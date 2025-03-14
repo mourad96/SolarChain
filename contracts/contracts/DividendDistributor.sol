@@ -5,7 +5,7 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./ShareToken.sol";
-import "./AssetRegistry.sol";
+import "./SolarPanelRegistry.sol";
 
 /**
  * @title DividendDistributor
@@ -15,7 +15,7 @@ contract DividendDistributor is AccessControl, Pausable {
     bytes32 public constant DISTRIBUTOR_ROLE = keccak256("DISTRIBUTOR_ROLE");
     
     ShareToken public shareToken;
-    AssetRegistry public assetRegistry;
+    SolarPanelRegistry public panelRegistry;
     IERC20 public paymentToken; // ERC20 token used for dividend payments (e.g., USDC)
     
     struct DividendInfo {
@@ -36,18 +36,18 @@ contract DividendDistributor is AccessControl, Pausable {
 
     constructor(
         address shareTokenAddress,
-        address assetRegistryAddress,
+        address panelRegistryAddress,
         address paymentTokenAddress
     ) {
         require(shareTokenAddress != address(0), "Invalid share token address");
-        require(assetRegistryAddress != address(0), "Invalid asset registry address");
+        require(panelRegistryAddress != address(0), "Invalid panel registry address");
         require(paymentTokenAddress != address(0), "Invalid payment token address");
         
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _setupRole(DISTRIBUTOR_ROLE, msg.sender);
         
         shareToken = ShareToken(shareTokenAddress);
-        assetRegistry = AssetRegistry(assetRegistryAddress);
+        panelRegistry = SolarPanelRegistry(panelRegistryAddress);
         paymentToken = IERC20(paymentTokenAddress);
     }
 
@@ -59,7 +59,7 @@ contract DividendDistributor is AccessControl, Pausable {
         require(amount > 0, "Amount must be greater than 0");
         
         // Verify panel exists and is active
-        (,,,, bool isActive,) = assetRegistry.getPanelDetails(panelId);
+        (,,,,,, bool isActive,) = panelRegistry.getPanelDetails(panelId);
         require(isActive, "Panel is not active");
         
         // Verify shares have been minted

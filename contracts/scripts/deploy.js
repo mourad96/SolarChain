@@ -1,0 +1,204 @@
+// SPDX-License-Identifier: MIT
+// Main deployment script for Solar Energy IoFy smart contracts
+// This script deploys all the necessary contracts for the Solar Energy IoFy platform
+
+const { ethers, network, run } = require("hardhat");
+const { updateFiles } = require("./update-addresses");
+
+async function main() {
+  console.log(`Deploying contracts to ${network.name}...`);
+
+  // Get deployer account
+  const [deployer] = await ethers.getSigners();
+  console.log(`Deployer address: ${deployer.address}`);
+  
+  // Check deployer balance
+  const balance = await ethers.provider.getBalance(deployer.address);
+  console.log(`Deployer balance: ${ethers.formatEther(balance)} ETH`);
+
+  // Set higher gas price to avoid "replacement transaction underpriced" error
+  const overrides = {
+    gasPrice: ethers.parseUnits("50", "gwei")
+  };
+
+  // Deploy SolarPanelRegistry
+  console.log("Deploying SolarPanelRegistry...");
+  const SolarPanelRegistry = await ethers.getContractFactory("SolarPanelRegistry");
+  const registry = await SolarPanelRegistry.deploy(overrides);
+  await registry.waitForDeployment();
+  const registryAddress = await registry.getAddress();
+  console.log(`SolarPanelRegistry deployed to: ${registryAddress}`);
+
+  // Deploy SolarPanelFactory
+  console.log("Deploying SolarPanelFactory...");
+  const SolarPanelFactory = await ethers.getContractFactory("SolarPanelFactory");
+  const factory = await SolarPanelFactory.deploy(registryAddress, overrides);
+  await factory.waitForDeployment();
+  const factoryAddress = await factory.getAddress();
+  console.log(`SolarPanelFactory deployed to: ${factoryAddress}`);
+
+  // Set factory address in registry
+  console.log("Setting factory address in registry...");
+  const setFactoryTx = await registry.setFactoryAddress(factoryAddress, overrides);
+  await setFactoryTx.wait();
+  console.log("Factory address set in registry");
+
+  // Deploy MockERC20 for dividend payments
+  console.log("Deploying MockERC20 (USDC)...");
+  const MockERC20 = await ethers.getContractFactory("MockERC20");
+  const paymentToken = await MockERC20.deploy("USD Coin", "USDC", overrides);
+  await paymentToken.waitForDeployment();
+  const paymentTokenAddress = await paymentToken.getAddress();
+  console.log(`MockERC20 (USDC) deployed to: ${paymentTokenAddress}`);
+
+  // Mint some tokens to deployer for testing
+  if (network.name !== "mainnet") {
+    console.log("Minting test tokens to deployer...");
+    const mintAmount = ethers.parseUnits("1000000", 18); // 1 million tokens
+    await paymentToken.mint(deployer.address, mintAmount, overrides);
+    console.log(`Minted ${ethers.formatUnits(mintAmount, 18)} USDC to deployer`);
+  }
+
+  // Deploy ShareToken
+  console.log("Deploying ShareToken...");
+  const ShareToken = await ethers.getContractFactory("ShareToken");
+  const shareToken = await ShareToken.deploy(registryAddress, overrides);
+  await shareToken.waitForDeployment();
+  const shareTokenAddress = await shareToken.getAddress();
+  console.log(`ShareToken deployed to: ${shareTokenAddress}`);
+
+  // Deploy DividendDistributor
+  console.log("Deploying DividendDistributor...");
+  const DividendDistributor = await ethers.getContractFactory("DividendDistributor");
+  const dividendDistributor = await DividendDistributor.deploy(
+    shareTokenAddress,
+    registryAddress,
+    paymentTokenAddress,
+    overrides
+  );
+  await dividendDistributor.waitForDeployment();
+  const dividendDistributorAddress = await dividendDistributor.getAddress();
+  console.log(`DividendDistributor deployed to: ${dividendDistributorAddress}`);
+
+  // Setup roles
+  console.log("Setting up roles...");
+  
+  // Grant MINTER_ROLE to the deployer account in ShareToken
+  const MINTER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("MINTER_ROLE"));
+  const grantMinterRoleTx = await shareToken.grantRole(MINTER_ROLE, deployer.address, overrides);
+  await grantMinterRoleTx.wait();
+  console.log("MINTER_ROLE granted to deployer in ShareToken");
+
+  // Grant DISTRIBUTOR_ROLE to the deployer account in DividendDistributor
+  const DISTRIBUTOR_ROLE = ethers.keccak256(ethers.toUtf8Bytes("DISTRIBUTOR_ROLE"));
+  const grantDistributorRoleTx = await dividendDistributor.grantRole(DISTRIBUTOR_ROLE, deployer.address, overrides);
+  await grantDistributorRoleTx.wait();
+  console.log("DISTRIBUTOR_ROLE granted to deployer in DividendDistributor");
+
+  // Grant REGISTRAR_ROLE to the deployer account in SolarPanelFactory
+  const REGISTRAR_ROLE = ethers.keccak256(ethers.toUtf8Bytes("REGISTRAR_ROLE"));
+  const grantRegistrarRoleTx = await factory.grantRole(REGISTRAR_ROLE, deployer.address, overrides);
+  await grantRegistrarRoleTx.wait();
+  console.log("REGISTRAR_ROLE granted to deployer in SolarPanelFactory");
+
+  // Grant FACTORY_ROLE to the factory address in registry
+  const FACTORY_ROLE = ethers.keccak256(ethers.toUtf8Bytes("FACTORY_ROLE"));
+  const grantFactoryRoleTx = await registry.grantRole(FACTORY_ROLE, factoryAddress, overrides);
+  await grantFactoryRoleTx.wait();
+  console.log("FACTORY_ROLE granted to factory in registry");
+
+  // Grant PANEL_OWNER_ROLE to the deployer in registry
+  const PANEL_OWNER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("PANEL_OWNER_ROLE"));
+  const grantPanelOwnerRoleTx = await registry.grantRole(PANEL_OWNER_ROLE, deployer.address, overrides);
+  await grantPanelOwnerRoleTx.wait();
+  console.log("PANEL_OWNER_ROLE granted to deployer in registry");
+
+  // Verify contracts on Etherscan if not on a local network
+  if (network.name !== "hardhat" && network.name !== "localhost") {
+    console.log("Waiting for block confirmations...");
+    // Wait for a few block confirmations to ensure the contracts are mined
+    await new Promise(resolve => setTimeout(resolve, 60000)); // Wait for 1 minute
+
+    console.log("Verifying contracts on Etherscan...");
+    try {
+      await run("verify:verify", {
+        address: registryAddress,
+        constructorArguments: [],
+      });
+      console.log("SolarPanelRegistry verified");
+    } catch (error) {
+      console.log("Error verifying SolarPanelRegistry:", error.message);
+    }
+
+    try {
+      await run("verify:verify", {
+        address: factoryAddress,
+        constructorArguments: [registryAddress],
+      });
+      console.log("SolarPanelFactory verified");
+    } catch (error) {
+      console.log("Error verifying SolarPanelFactory:", error.message);
+    }
+
+    try {
+      await run("verify:verify", {
+        address: paymentTokenAddress,
+        constructorArguments: ["USD Coin", "USDC"],
+      });
+      console.log("MockERC20 verified");
+    } catch (error) {
+      console.log("Error verifying MockERC20:", error.message);
+    }
+
+    try {
+      await run("verify:verify", {
+        address: shareTokenAddress,
+        constructorArguments: [registryAddress],
+      });
+      console.log("ShareToken verified");
+    } catch (error) {
+      console.log("Error verifying ShareToken:", error.message);
+    }
+
+    try {
+      await run("verify:verify", {
+        address: dividendDistributorAddress,
+        constructorArguments: [shareTokenAddress, registryAddress, paymentTokenAddress],
+      });
+      console.log("DividendDistributor verified");
+    } catch (error) {
+      console.log("Error verifying DividendDistributor:", error.message);
+    }
+  }
+
+  // Print deployment summary
+  console.log("\n=== Deployment Summary ===");
+  console.log({
+    network: network.name,
+    registry: registryAddress,
+    factory: factoryAddress,
+    paymentToken: paymentTokenAddress,
+    shareToken: shareTokenAddress,
+    dividendDistributor: dividendDistributorAddress
+  });
+  console.log("=========================\n");
+
+  // Update .env and README.md with contract addresses
+  const addresses = {
+    registry: registryAddress,
+    factory: factoryAddress,
+    shareToken: shareTokenAddress,
+    dividendDistributor: dividendDistributorAddress,
+    paymentToken: paymentTokenAddress
+  };
+  
+  updateFiles(addresses);
+}
+
+// Execute the deployment
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error("Error during deployment:", error);
+    process.exit(1);
+  }); 

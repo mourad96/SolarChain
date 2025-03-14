@@ -1,95 +1,109 @@
-# IOFY Smart Contracts
+# Solar Energy IoFy Smart Contracts
 
-This directory contains the smart contracts for the IOFY solar panel tokenization platform. The contracts are written in Solidity and use the Hardhat development environment.
+This repository contains the smart contracts for the Solar Energy IoFy platform, which enables the registration, tokenization, and dividend distribution for solar panels.
 
-## Contracts Overview
+## Contracts
 
-1. **AssetRegistry.sol**: Manages the registration and tracking of solar panels.
-2. **ShareToken.sol**: ERC20 token implementation for solar panel shares.
-3. **DividendDistributor.sol**: Handles the distribution of dividends to token holders.
-4. **MockERC20.sol**: A mock ERC20 token for testing purposes (represents USDC in development).
+### SolarPanelRegistry.sol
+The central registry for all solar panels. It stores panel details and manages ownership.
 
-## Setup
+### SolarPanelFactory.sol
+Factory contract for batch registration of solar panels. Uses the Factory pattern to efficiently register multiple panels at once.
 
+### ShareToken.sol
+ERC20 token representing shares in solar panels. Allows for the tokenization of solar panel ownership.
+
+### DividendDistributor.sol
+Handles the distribution of dividends to solar panel share holders.
+
+### MockERC20.sol
+A simple ERC20 token implementation for testing purposes. Used to simulate dividend payments.
+
+## Deployment
+
+### Prerequisites
+- Node.js (v14+)
+- npm or yarn
+- Hardhat
+
+### Setup
 1. Install dependencies:
 ```bash
 npm install
 ```
 
-2. Copy the environment file and fill in your values:
-```bash
-cp .env.example .env
+2. Create a `.env` file with the following variables:
+```
+PRIVATE_KEY=your_private_key
+INFURA_API_KEY=your_infura_api_key
+ETHERSCAN_API_KEY=your_etherscan_api_key
 ```
 
-3. Configure your `.env` file with:
-- `MUMBAI_URL`: Your Mumbai testnet RPC URL
-- `PRIVATE_KEY`: Your deployment wallet's private key
-- `POLYGONSCAN_API_KEY`: Your PolygonScan API key for contract verification
-- `COINMARKETCAP_API_KEY`: (Optional) For gas reporting
-
-## Development
-
-1. Compile contracts:
+### Deploy Contracts
+To deploy all contracts to a network:
 ```bash
-npm run compile
+npx hardhat run scripts/deploy.js --network <network-name>
 ```
 
-2. Run tests:
+Available networks are defined in `hardhat.config.js`.
+
+### Verify Contracts
+If you need to manually verify a contract:
 ```bash
-npm test
+npx hardhat run scripts/verify-contract.ts --network <network-name> --address <contract-address> --args '<constructor-args-as-json-array>'
 ```
 
-3. Generate coverage report:
+Example:
 ```bash
-npm run coverage
+npx hardhat run scripts/verify-contract.ts --network polygon --address 0x123... --args '["0x456...", "USD Coin", "USDC"]'
 ```
 
-## Deployment
+## Contract Interactions
 
-### Local Deployment
-To deploy on the local Hardhat network:
-```bash
-npm run deploy:local
+### Register a Solar Panel
+```javascript
+// Using the registry directly
+await registry.registerPanel("SN001", "SolarCorp", 300);
+
+// Using the factory for batch registration
+await factory.registerPanelsBatch(
+  ["SN001", "SN002", "SN003"],
+  ["SolarCorp", "SunPower", "EcoSolar"],
+  ["Panel 1", "Panel 2", "Panel 3"],
+  ["Location 1", "Location 2", "Location 3"],
+  [300, 400, 500]
+);
 ```
 
-### Mumbai Testnet Deployment
-1. Ensure your `.env` file is configured correctly
-2. Deploy to Mumbai:
-```bash
-npm run deploy:mumbai
+### Mint Shares for a Panel
+```javascript
+await shareToken.mintShares(panelId, 1000); // 1000 shares
 ```
 
-3. Verify contracts on PolygonScan:
-```bash
-npm run verify:mumbai
+### Distribute Dividends
+```javascript
+// Approve the dividend distributor to spend your payment tokens
+await paymentToken.approve(dividendDistributor.address, 100);
+
+// Distribute dividends
+await dividendDistributor.distributeDividends(panelId, 100);
 ```
 
-## Contract Addresses
-
-After deployment, the script will output the addresses of all deployed contracts. Save these addresses as they will be needed for the frontend and backend integration.
-
-## Security
-
-The contracts use OpenZeppelin's battle-tested implementations for:
-- Access Control
-- ERC20 tokens
-- Pausable functionality
-- Safe math operations
-
-## Testing
-
-The contracts include a comprehensive test suite. Run the tests with:
-```bash
-npm test
+### Claim Dividends
+```javascript
+await dividendDistributor.claimDividends(panelId);
 ```
-
-## Gas Optimization
-
-The contracts are optimized for gas efficiency with:
-- Efficient storage patterns
-- Minimal state changes
-- Batched operations where possible
 
 ## License
-
 MIT 
+## Deployed Contracts (Amoy Testnet)
+
+| Contract | Address |
+|----------|---------|
+| SolarPanelRegistry | [0x3B381E11c30d7aF900Ee4AD206A7462F63e9613a](https://amoy.polygonscan.com/address/0x3B381E11c30d7aF900Ee4AD206A7462F63e9613a) |
+| SolarPanelFactory | [0xdD73Ddf9cd27c2896F699165630f528eA11Bd89a](https://amoy.polygonscan.com/address/0xdD73Ddf9cd27c2896F699165630f528eA11Bd89a) |
+| ShareToken | [0x5992b23D95c26d93F492403cD45F9f5B7d59867E](https://amoy.polygonscan.com/address/0x5992b23D95c26d93F492403cD45F9f5B7d59867E) |
+| DividendDistributor | [0x70595E4B671b78Be962ad366b75a1F859b288862](https://amoy.polygonscan.com/address/0x70595E4B671b78Be962ad366b75a1F859b288862) |
+| MockERC20 (USDC) | [0x2104395e21B3404FB9A77800E03A5074BFCA8827](https://amoy.polygonscan.com/address/0x2104395e21B3404FB9A77800E03A5074BFCA8827) |
+
+Last deployed: 2025-03-14T21:49:51.242Z

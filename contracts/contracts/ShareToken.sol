@@ -4,7 +4,7 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
-import "./AssetRegistry.sol";
+import "./SolarPanelRegistry.sol";
 
 /**
  * @title ShareToken
@@ -13,7 +13,7 @@ import "./AssetRegistry.sol";
 contract ShareToken is ERC20, AccessControl, Pausable {
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     
-    AssetRegistry public assetRegistry;
+    SolarPanelRegistry public panelRegistry;
     
     // Mapping from panel ID to token details
     struct TokenDetails {
@@ -30,11 +30,11 @@ contract ShareToken is ERC20, AccessControl, Pausable {
     event SharesMinted(uint256 indexed panelId, uint256 amount);
     event SharesTransferred(uint256 indexed panelId, address from, address to, uint256 amount);
 
-    constructor(address assetRegistryAddress) ERC20("Solar Panel Share", "SOLAR") {
-        require(assetRegistryAddress != address(0), "Invalid asset registry address");
+    constructor(address panelRegistryAddress) ERC20("Solar Panel Share", "SOLAR") {
+        require(panelRegistryAddress != address(0), "Invalid panel registry address");
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _setupRole(MINTER_ROLE, msg.sender);
-        assetRegistry = AssetRegistry(assetRegistryAddress);
+        panelRegistry = SolarPanelRegistry(panelRegistryAddress);
     }
 
     function mintShares(uint256 panelId, uint256 amount) 
@@ -45,8 +45,8 @@ contract ShareToken is ERC20, AccessControl, Pausable {
         require(amount > 0, "Amount must be greater than 0");
         require(!panelTokens[panelId].isMinted, "Shares already minted for this panel");
         
-        // Verify panel exists and is active in the asset registry
-        (,,,address owner, bool isActive,) = assetRegistry.getPanelDetails(panelId);
+        // Verify panel exists and is active in the panel registry
+        (,,,,,address owner, bool isActive,) = panelRegistry.getPanelDetails(panelId);
         require(isActive, "Panel is not active");
         
         panelTokens[panelId] = TokenDetails({
