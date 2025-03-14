@@ -1,0 +1,65 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String
+  password      String
+  role          String    @default("user")
+  walletAddress String?
+  panels        Panel[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Panel {
+  id              String   @id @default(uuid())
+  name            String
+  location        String
+  capacity        Float
+  status          String   @default("active")
+  ownerId         String
+  owner           User     @relation(fields: [ownerId], references: [id])
+  blockchainTxHash String?
+  devices         IoTDevice[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("panels")
+}
+
+model IoTDevice {
+  id           String       @id @default(uuid())
+  deviceType   String
+  serialNumber String      @unique
+  status       String      @default("offline")
+  panel        Panel       @relation(fields: [panelId], references: [id])
+  panelId      String
+  readings     IoTReading[]
+  lastUpdate   DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model IoTReading {
+  id           String     @id @default(uuid())
+  device       IoTDevice  @relation(fields: [deviceId], references: [id])
+  deviceId     String
+  energyOutput Float
+  temperature  Float
+  voltage      Float
+  current      Float
+  timestamp    DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+} 
