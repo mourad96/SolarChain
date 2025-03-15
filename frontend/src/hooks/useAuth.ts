@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import axios from 'axios';
 
 interface User {
   id: string;
   name: string;
   email: string;
   walletAddress?: string;
-  role: 'user' | 'admin';
+  role: 'owner' | 'investor';
 }
 
 interface LoginData {
@@ -25,6 +24,14 @@ interface AuthState {
   error: string | null;
 }
 
+// For UI demo purposes, we'll create a mock user
+const createMockUser = (role: 'owner' | 'investor' = 'owner'): User => ({
+  id: '123456',
+  name: role === 'owner' ? 'John Owner' : 'Jane Investor',
+  email: role === 'owner' ? 'owner@example.com' : 'investor@example.com',
+  role: role,
+});
+
 export function useAuth() {
   const [state, setState] = useState<AuthState>({
     user: null,
@@ -34,96 +41,61 @@ export function useAuth() {
   const router = useRouter();
 
   useEffect(() => {
-    checkAuth();
+    // Check if we have a role stored in localStorage
+    const storedRole = localStorage.getItem('userRole') as 'owner' | 'investor' | null;
+    
+    // For UI demo, we'll always have a user after a short delay
+    setTimeout(() => {
+      setState({
+        user: storedRole ? createMockUser(storedRole) : null,
+        isLoading: false,
+        error: null,
+      });
+    }, 500);
   }, []);
 
-  const checkAuth = async () => {
+  const login = async (data: LoginData, role: 'owner' | 'investor' = 'owner') => {
     try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        setState((prev) => ({ ...prev, isLoading: false }));
-        return;
-      }
-
-      const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
+      // For UI demo, we'll just create a mock user
+      localStorage.setItem('userRole', role);
+      
       setState({
-        user: response.data.user,
+        user: createMockUser(role),
         isLoading: false,
         error: null,
       });
-    } catch (error) {
-      setState({
-        user: null,
-        isLoading: false,
-        error: 'Failed to authenticate',
-      });
-      localStorage.removeItem('token');
-    }
-  };
-
-  const login = async (data: LoginData) => {
-    try {
-      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/login`, data);
-      localStorage.setItem('token', response.data.token);
-      setState({
-        user: response.data.user,
-        isLoading: false,
-        error: null,
-      });
+      
+      return { success: true };
     } catch (error) {
       throw new Error('Invalid credentials');
     }
   };
 
-  const register = async (data: RegisterData) => {
+  const register = async (data: RegisterData, role: 'owner' | 'investor' = 'owner') => {
     try {
-      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/register`, data);
-      localStorage.setItem('token', response.data.token);
+      // For UI demo, we'll just create a mock user
+      localStorage.setItem('userRole', role);
+      
       setState({
-        user: response.data.user,
+        user: createMockUser(role),
         isLoading: false,
         error: null,
       });
+      
+      return { success: true };
     } catch (error) {
-      console.error('Registration error:', error);
       throw new Error('Registration failed');
     }
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
+    localStorage.removeItem('userRole');
     setState({
       user: null,
       isLoading: false,
       error: null,
     });
-    router.push('/auth/login');
-  };
-
-  const connectWallet = async (address: string) => {
-    try {
-      const token = localStorage.getItem('token');
-      if (!token || !state.user) throw new Error('Not authenticated');
-
-      const response = await axios.post(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/connect-wallet`,
-        { address },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      setState({
-        user: response.data.user,
-        isLoading: false,
-        error: null,
-      });
-    } catch (error) {
-      throw new Error('Failed to connect wallet');
-    }
+    router.push('/');
   };
 
   return {
@@ -133,6 +105,5 @@ export function useAuth() {
     login,
     register,
     logout,
-    connectWallet,
   };
 } 

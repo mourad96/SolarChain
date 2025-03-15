@@ -13,9 +13,12 @@ build/
 artifacts/
 cache/
 typechain-types/
+frontend/.next/
+
 
 # IDE and editor files
 .cursor/
+.next/
 .idea/
 .vscode/
 *.swp

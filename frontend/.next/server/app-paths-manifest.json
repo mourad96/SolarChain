@@ -1,7 +1,0 @@
-{
-  "/auth/login/page": "app/auth/login/page.js",
-  "/dashboard/panels/page": "app/dashboard/panels/page.js",
-  "/dashboard/page": "app/dashboard/page.js",
-  "/dashboard/iot/page": "app/dashboard/iot/page.js",
-  "/dashboard/tokens/page": "app/dashboard/tokens/page.js"
-}
