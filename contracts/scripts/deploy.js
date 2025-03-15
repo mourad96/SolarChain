@@ -37,11 +37,12 @@ async function main() {
   const factoryAddress = await factory.getAddress();
   console.log(`SolarPanelFactory deployed to: ${factoryAddress}`);
 
-  // Set factory address in registry
-  console.log("Setting factory address in registry...");
-  const setFactoryTx = await registry.setFactoryAddress(factoryAddress, overrides);
-  await setFactoryTx.wait();
-  console.log("Factory address set in registry");
+  // Grant FACTORY_ROLE to the factory address in registry
+  console.log("Granting FACTORY_ROLE to factory in registry...");
+  const FACTORY_ROLE = ethers.keccak256(ethers.toUtf8Bytes("FACTORY_ROLE"));
+  const grantFactoryRoleTx = await registry.grantRole(FACTORY_ROLE, factoryAddress, overrides);
+  await grantFactoryRoleTx.wait();
+  console.log("FACTORY_ROLE granted to factory in registry");
 
   // Deploy MockERC20 for dividend payments
   console.log("Deploying MockERC20 (USDC)...");
@@ -101,12 +102,6 @@ async function main() {
   await grantRegistrarRoleTx.wait();
   console.log("REGISTRAR_ROLE granted to deployer in SolarPanelFactory");
 
-  // Grant FACTORY_ROLE to the factory address in registry
-  const FACTORY_ROLE = ethers.keccak256(ethers.toUtf8Bytes("FACTORY_ROLE"));
-  const grantFactoryRoleTx = await registry.grantRole(FACTORY_ROLE, factoryAddress, overrides);
-  await grantFactoryRoleTx.wait();
-  console.log("FACTORY_ROLE granted to factory in registry");
-
   // Grant PANEL_OWNER_ROLE to the deployer in registry
   const PANEL_OWNER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("PANEL_OWNER_ROLE"));
   const grantPanelOwnerRoleTx = await registry.grantRole(PANEL_OWNER_ROLE, deployer.address, overrides);
@@ -117,7 +112,7 @@ async function main() {
   if (network.name !== "hardhat" && network.name !== "localhost") {
     console.log("Waiting for block confirmations...");
     // Wait for a few block confirmations to ensure the contracts are mined
-    await new Promise(resolve => setTimeout(resolve, 60000)); // Wait for 1 minute
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for 2s
 
     console.log("Verifying contracts on Etherscan...");
     try {

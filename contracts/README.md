@@ -96,14 +96,17 @@ await dividendDistributor.claimDividends(panelId);
 
 ## License
 MIT 
+
+
+
 ## Deployed Contracts (Amoy Testnet)
 
 | Contract | Address |
 |----------|---------|
-| SolarPanelRegistry | [0x3B381E11c30d7aF900Ee4AD206A7462F63e9613a](https://amoy.polygonscan.com/address/0x3B381E11c30d7aF900Ee4AD206A7462F63e9613a) |
-| SolarPanelFactory | [0xdD73Ddf9cd27c2896F699165630f528eA11Bd89a](https://amoy.polygonscan.com/address/0xdD73Ddf9cd27c2896F699165630f528eA11Bd89a) |
-| ShareToken | [0x5992b23D95c26d93F492403cD45F9f5B7d59867E](https://amoy.polygonscan.com/address/0x5992b23D95c26d93F492403cD45F9f5B7d59867E) |
-| DividendDistributor | [0x70595E4B671b78Be962ad366b75a1F859b288862](https://amoy.polygonscan.com/address/0x70595E4B671b78Be962ad366b75a1F859b288862) |
-| MockERC20 (USDC) | [0x2104395e21B3404FB9A77800E03A5074BFCA8827](https://amoy.polygonscan.com/address/0x2104395e21B3404FB9A77800E03A5074BFCA8827) |
+| SolarPanelRegistry | [0x9d830BDfF945791134bc62F69e2ad6111Fb9856A](https://amoy.polygonscan.com/address/0x9d830BDfF945791134bc62F69e2ad6111Fb9856A) |
+| SolarPanelFactory | [0x3E2A78154867Cd41D24319c507e6E11014C7Cbe2](https://amoy.polygonscan.com/address/0x3E2A78154867Cd41D24319c507e6E11014C7Cbe2) |
+| ShareToken | [0x974624CEC8a9AB793baDB767d32025C39C6Acd78](https://amoy.polygonscan.com/address/0x974624CEC8a9AB793baDB767d32025C39C6Acd78) |
+| DividendDistributor | [0x626088F5255A9cF99C0b00a88E2D06AD3911f4D7](https://amoy.polygonscan.com/address/0x626088F5255A9cF99C0b00a88E2D06AD3911f4D7) |
+| MockERC20 (USDC) | [0x35c18a8F5Abb163aee1b2cB8087aaC5C7069b3a5](https://amoy.polygonscan.com/address/0x35c18a8F5Abb163aee1b2cB8087aaC5C7069b3a5) |
 
-Last deployed: 2025-03-14T21:49:51.242Z
+Last deployed: 2025-03-15T02:14:22.901Z

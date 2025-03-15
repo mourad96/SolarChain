@@ -11,7 +11,7 @@ describe("DividendDistributor", function () {
   let owner: SignerWithAddress;
   let user1: SignerWithAddress;
   let user2: SignerWithAddress;
-  let panelId: number;
+  let panelId: bigint;
   
   const ADMIN_ROLE = ethers.keccak256(ethers.toUtf8Bytes("ADMIN_ROLE"));
   const FACTORY_ROLE = ethers.keccak256(ethers.toUtf8Bytes("FACTORY_ROLE"));
@@ -60,32 +60,17 @@ describe("DividendDistributor", function () {
     await shareToken.grantRole(MINTER_ROLE, owner.address);
     await dividendDistributor.grantRole(DISTRIBUTOR_ROLE, owner.address);
     
-    // Register a panel
-    const tx = await solarPanelRegistry.registerPanelAsset(
+    // Register a test panel
+    await solarPanelRegistry.registerPanelByFactory(
+      "TEST001",
+      "TestManufacturer",
       "Test Panel",
       "Test Location",
-      5000 // 5kW
+      5000,
+      owner.address
     );
     
-    const receipt = await tx.wait();
-    
-    if (receipt) {
-      // Find the PanelRegistered event to get the panelId
-      const events = receipt.logs.filter(log => {
-        try {
-          return solarPanelRegistry.interface.parseLog(log)?.name === 'PanelRegistered';
-        } catch (e) {
-          return false;
-        }
-      });
-      
-      if (events.length > 0) {
-        const parsedLog = solarPanelRegistry.interface.parseLog(events[0]);
-        if (parsedLog && parsedLog.args) {
-          panelId = parsedLog.args.panelId;
-        }
-      }
-    }
+    panelId = await solarPanelRegistry.serialNumberToId("TEST001");
     
     // Mint shares for the panel
     await shareToken.mintShares(panelId, totalShares);

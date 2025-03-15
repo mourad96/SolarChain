@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 
 /**
  * @title SolarPanelRegistry
- * @dev Enhanced contract for registering and managing solar panel assets with factory pattern support
+ * @dev Contract for registering and managing solar panel assets
  */
 contract SolarPanelRegistry is AccessControl, Pausable {
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
@@ -14,10 +14,8 @@ contract SolarPanelRegistry is AccessControl, Pausable {
     bytes32 public constant FACTORY_ROLE = keccak256("FACTORY_ROLE");
 
     struct Panel {
-        // Manufacturing details
         string serialNumber;
         string manufacturer;
-        // Asset details
         string name;
         string location;
         uint256 capacity; // in watts
@@ -35,9 +33,6 @@ contract SolarPanelRegistry is AccessControl, Pausable {
     
     uint256 private _nextPanelId;
 
-    // Factory address that is allowed to register panels
-    address public factoryAddress;
-
     event PanelRegistered(
         uint256 indexed panelId,
         string serialNumber,
@@ -49,7 +44,6 @@ contract SolarPanelRegistry is AccessControl, Pausable {
     );
     event PanelUpdated(uint256 indexed panelId, string name, string location, uint256 capacity);
     event PanelStatusChanged(uint256 indexed panelId, bool isActive);
-    event FactoryAddressUpdated(address indexed previousFactory, address indexed newFactory);
 
     modifier onlyPanelOwnerOrAdmin(uint256 panelId) {
         require(
@@ -76,28 +70,7 @@ contract SolarPanelRegistry is AccessControl, Pausable {
     }
 
     /**
-     * @dev Sets the factory address that is allowed to register panels
-     * @param _factoryAddress The address of the factory contract
-     */
-    function setFactoryAddress(address _factoryAddress) external onlyRole(ADMIN_ROLE) {
-        address oldFactory = factoryAddress;
-        factoryAddress = _factoryAddress;
-        
-        // Revoke factory role from old factory if it exists
-        if (oldFactory != address(0) && hasRole(FACTORY_ROLE, oldFactory)) {
-            revokeRole(FACTORY_ROLE, oldFactory);
-        }
-        
-        // Grant factory role to new factory
-        if (_factoryAddress != address(0)) {
-            grantRole(FACTORY_ROLE, _factoryAddress);
-        }
-        
-        emit FactoryAddressUpdated(oldFactory, _factoryAddress);
-    }
-
-    /**
-     * @dev Registers a new panel with full details
+     * @dev Registers a new panel
      * @param _serialNumber The serial number of the panel
      * @param _manufacturer The manufacturer of the panel
      * @param _name The name of the panel
@@ -119,6 +92,7 @@ contract SolarPanelRegistry is AccessControl, Pausable {
         require(bytes(_name).length > 0, "Name cannot be empty");
         require(bytes(_location).length > 0, "Location cannot be empty");
         require(_capacity > 0, "Capacity must be greater than 0");
+        require(_owner != address(0), "Owner cannot be zero address");
         require(serialNumberToId[_serialNumber] == 0, "Panel with this serial number already registered");
 
         uint256 panelId = _nextPanelId++;
@@ -152,52 +126,6 @@ contract SolarPanelRegistry is AccessControl, Pausable {
         );
         
         return panelId;
-    }
-
-    /**
-     * @dev Registers a new panel with minimal details (for backward compatibility with SolarPanelRegistry)
-     * @param _serialNumber The serial number of the panel
-     * @param _manufacturer The manufacturer of the panel
-     * @param _capacity The capacity of the panel
-     * @return panelId The ID of the registered panel
-     */
-    function registerPanel(
-        string memory _serialNumber,
-        string memory _manufacturer,
-        uint256 _capacity
-    ) public whenNotPaused returns (uint256) {
-        return registerPanelByFactory(
-            _serialNumber,
-            _manufacturer,
-            _serialNumber, // Use serial number as name for backward compatibility
-            "Not specified", // Default location
-            _capacity,
-            msg.sender
-        );
-    }
-
-    /**
-     * @dev Registers a new panel with full details (for backward compatibility with AssetRegistry)
-     * @param _name The name of the panel
-     * @param _location The location of the panel
-     * @param _capacity The capacity of the panel
-     * @return panelId The ID of the registered panel
-     */
-    function registerPanelAsset(
-        string memory _name,
-        string memory _location,
-        uint256 _capacity
-    ) external whenNotPaused returns (uint256) {
-        // Generate a unique serial number based on name and timestamp
-        string memory serialNumber = string(abi.encodePacked(_name, "-", uint2str(block.timestamp)));
-        return registerPanelByFactory(
-            serialNumber,
-            "Not specified", // Default manufacturer
-            _name,
-            _location,
-            _capacity,
-            msg.sender
-        );
     }
 
     /**
@@ -242,92 +170,16 @@ contract SolarPanelRegistry is AccessControl, Pausable {
     }
 
     /**
-     * @dev Gets panel details by ID
-     * @param panelId The ID of the panel
-     * @return serialNumber The serial number of the panel
-     * @return manufacturer The manufacturer of the panel
-     * @return name The name of the panel
-     * @return location The location of the panel
-     * @return capacity The capacity of the panel
-     * @return owner The owner of the panel
-     * @return isActive Whether the panel is active
-     * @return registrationDate The registration date of the panel
-     */
-    function getPanelDetails(uint256 panelId) 
-        external 
-        view 
-        returns (
-            string memory serialNumber,
-            string memory manufacturer,
-            string memory name,
-            string memory location,
-            uint256 capacity,
-            address owner,
-            bool isActive,
-            uint256 registrationDate
-        ) 
-    {
-        Panel storage panel = panels[panelId];
-        require(panel.owner != address(0), "Panel does not exist");
-        return (
-            panel.serialNumber,
-            panel.manufacturer,
-            panel.name,
-            panel.location,
-            panel.capacity,
-            panel.owner,
-            panel.isActive,
-            panel.registrationDate
-        );
-    }
-
-    /**
-     * @dev Gets panel details by serial number (for backward compatibility)
-     * @param _serialNumber The serial number of the panel
-     * @return serialNumber The serial number of the panel
-     * @return manufacturer The manufacturer of the panel
-     * @return capacity The capacity of the panel
-     * @return registrationDate The registration date of the panel
-     * @return owner The owner of the panel
-     * @return isActive Whether the panel is active
-     */
-    function getPanelBySerialNumber(string memory _serialNumber) 
-        public 
-        view 
-        returns (
-            string memory serialNumber,
-            string memory manufacturer,
-            uint256 capacity,
-            uint256 registrationDate,
-            address owner,
-            bool isActive
-        ) 
-    {
-        uint256 panelId = serialNumberToId[_serialNumber];
-        require(panelId != 0, "Panel not found");
-        
-        Panel storage panel = panels[panelId];
-        return (
-            panel.serialNumber,
-            panel.manufacturer,
-            panel.capacity,
-            panel.registrationDate,
-            panel.owner,
-            panel.isActive
-        );
-    }
-
-    /**
-     * @dev Gets all panels owned by an address
-     * @param _owner The owner address
+     * @dev Gets all panel IDs owned by an address
+     * @param owner The address to query
      * @return Array of panel IDs
      */
-    function getOwnerPanels(address _owner) 
-        public 
+    function getPanelsByOwner(address owner) 
+        external 
         view 
         returns (uint256[] memory) 
     {
-        return ownerPanels[_owner];
+        return ownerPanels[owner];
     }
 
     /**
@@ -342,32 +194,5 @@ contract SolarPanelRegistry is AccessControl, Pausable {
      */
     function unpause() external onlyRole(ADMIN_ROLE) {
         _unpause();
-    }
-
-    /**
-     * @dev Utility function to convert uint to string
-     * @param _i The uint to convert
-     * @return The string representation
-     */
-    function uint2str(uint _i) internal pure returns (string memory) {
-        if (_i == 0) {
-            return "0";
-        }
-        uint j = _i;
-        uint len;
-        while (j != 0) {
-            len++;
-            j /= 10;
-        }
-        bytes memory bstr = new bytes(len);
-        uint k = len;
-        while (_i != 0) {
-            k = k-1;
-            uint8 temp = (48 + uint8(_i - _i / 10 * 10));
-            bytes1 b1 = bytes1(temp);
-            bstr[k] = b1;
-            _i /= 10;
-        }
-        return string(bstr);
     }
 } 

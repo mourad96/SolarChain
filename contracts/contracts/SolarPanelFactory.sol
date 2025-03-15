@@ -7,7 +7,7 @@ import "./SolarPanelRegistry.sol";
 
 /**
  * @title SolarPanelFactory
- * @dev Factory contract for registering multiple solar panels at once
+ * @dev Factory contract for registering solar panels
  */
 contract SolarPanelFactory is AccessControl, Pausable {
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
@@ -16,7 +16,6 @@ contract SolarPanelFactory is AccessControl, Pausable {
     SolarPanelRegistry public registry;
     
     event BatchPanelsRegistered(uint256 count, address indexed owner);
-    event RegistryAddressUpdated(address indexed previousRegistry, address indexed newRegistry);
     
     /**
      * @dev Constructor that sets the registry address
@@ -30,18 +29,6 @@ contract SolarPanelFactory is AccessControl, Pausable {
         _setupRole(REGISTRAR_ROLE, msg.sender);
         
         registry = SolarPanelRegistry(_registryAddress);
-    }
-    
-    /**
-     * @dev Updates the registry address
-     * @param _registryAddress The new registry address
-     */
-    function setRegistryAddress(address _registryAddress) external onlyRole(ADMIN_ROLE) {
-        require(_registryAddress != address(0), "Invalid registry address");
-        
-        address oldRegistry = address(registry);
-        registry = SolarPanelRegistry(_registryAddress);
-        emit RegistryAddressUpdated(oldRegistry, _registryAddress);
     }
     
     /**
@@ -80,37 +67,7 @@ contract SolarPanelFactory is AccessControl, Pausable {
     }
     
     /**
-     * @dev Registers multiple panels at once with minimal details (for backward compatibility)
-     * @param _serialNumbers Array of serial numbers
-     * @param _manufacturers Array of manufacturers
-     * @param _capacities Array of capacities
-     */
-    function registerPanelsBatchSimple(
-        string[] memory _serialNumbers,
-        string[] memory _manufacturers,
-        uint256[] memory _capacities
-    ) external whenNotPaused {
-        require(_serialNumbers.length == _manufacturers.length, "Arrays length mismatch");
-        require(_serialNumbers.length == _capacities.length, "Arrays length mismatch");
-        require(_serialNumbers.length > 0, "Empty arrays");
-        
-        string[] memory defaultLocations = new string[](_serialNumbers.length);
-        for (uint256 i = 0; i < _serialNumbers.length; i++) {
-            defaultLocations[i] = "Not specified";
-        }
-        
-        registerPanelsBatchForOwners(
-            _serialNumbers,
-            _manufacturers,
-            _serialNumbers, // Use serial numbers as names
-            defaultLocations,
-            _capacities,
-            fillArray(msg.sender, _serialNumbers.length)
-        );
-    }
-    
-    /**
-     * @dev Registers multiple panels at once for specified owners
+     * @dev Registers multiple panels at once for specified owners (admin only)
      * @param _serialNumbers Array of serial numbers
      * @param _manufacturers Array of manufacturers
      * @param _names Array of panel names
@@ -145,20 +102,6 @@ contract SolarPanelFactory is AccessControl, Pausable {
         }
         
         emit BatchPanelsRegistered(_serialNumbers.length, address(0));
-    }
-    
-    /**
-     * @dev Utility function to create an array filled with the same address
-     * @param addr The address to fill the array with
-     * @param length The length of the array
-     * @return The filled array
-     */
-    function fillArray(address addr, uint256 length) internal pure returns (address[] memory) {
-        address[] memory result = new address[](length);
-        for (uint256 i = 0; i < length; i++) {
-            result[i] = addr;
-        }
-        return result;
     }
     
     /**

@@ -59,7 +59,8 @@ contract DividendDistributor is AccessControl, Pausable {
         require(amount > 0, "Amount must be greater than 0");
         
         // Verify panel exists and is active
-        (,,,,,, bool isActive,) = panelRegistry.getPanelDetails(panelId);
+        (string memory serialNumber, , , , , , bool isActive, ) = panelRegistry.panels(panelId);
+        require(bytes(serialNumber).length > 0, "Panel does not exist");
         require(isActive, "Panel is not active");
         
         // Verify shares have been minted

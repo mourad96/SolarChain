@@ -46,8 +46,11 @@ describe("Solar Energy IoFy Integration Tests", function () {
     factory = await SolarPanelFactory.deploy(await registry.getAddress());
     await factory.waitForDeployment();
 
-    // Set factory address in registry
-    await registry.setFactoryAddress(await factory.getAddress());
+    // Grant roles
+    // Registry roles - owner already has DEFAULT_ADMIN_ROLE and ADMIN_ROLE
+    await registry.grantRole(FACTORY_ROLE, await factory.getAddress());
+    await registry.grantRole(FACTORY_ROLE, owner.address);
+    await registry.grantRole(DEFAULT_ADMIN_ROLE, await factory.getAddress());
     
     // Deploy MockERC20
     const MockERC20 = await ethers.getContractFactory("MockERC20");
@@ -73,6 +76,7 @@ describe("Solar Energy IoFy Integration Tests", function () {
     
     // Grant roles
     // Registry roles - owner already has DEFAULT_ADMIN_ROLE and ADMIN_ROLE
+    await registry.grantRole(FACTORY_ROLE, await factory.getAddress());
     await registry.grantRole(FACTORY_ROLE, owner.address);
     
     // ShareToken roles - owner already has DEFAULT_ADMIN_ROLE
@@ -89,19 +93,33 @@ describe("Solar Energy IoFy Integration Tests", function () {
     const capacities = [5000, 6000]; // 5kW and 6kW
     
     // First, register a panel directly through the registry to get panelId1
-    await registry.registerPanel(serialNumbers[0], manufacturers[0], capacities[0]);
+    await registry.registerPanelByFactory(
+      serialNumbers[0],
+      manufacturers[0],
+      names[0],
+      locations[0],
+      capacities[0],
+      owner.address
+    );
     panelId1 = await registry.serialNumberToId(serialNumbers[0]);
     
     // Then register the second panel
-    await registry.registerPanel(serialNumbers[1], manufacturers[1], capacities[1]);
+    await registry.registerPanelByFactory(
+      serialNumbers[1],
+      manufacturers[1],
+      names[1],
+      locations[1],
+      capacities[1],
+      owner.address
+    );
     panelId2 = await registry.serialNumberToId(serialNumbers[1]);
   });
 
   describe("End-to-End Flow", function () {
     it("Should register panels, mint shares, distribute and claim dividends", async function () {
       // 1. Verify panels were registered correctly
-      const panel1 = await registry.getPanelDetails(panelId1);
-      const panel2 = await registry.getPanelDetails(panelId2);
+      const panel1 = await registry.panels(panelId1);
+      const panel2 = await registry.panels(panelId2);
       
       expect(panel1.serialNumber).to.equal("SN001");
       expect(panel2.serialNumber).to.equal("SN002");
@@ -204,9 +222,11 @@ describe("Solar Energy IoFy Integration Tests", function () {
       
       // Try operations while paused
       await expect(
-        factory.registerPanelsBatchSimple(
+        factory.registerPanelsBatch(
           ["SN003"],
           ["SolarCorp"],
+          ["Panel 3"],
+          ["Location 3"],
           [5000]
         )
       ).to.be.revertedWith("Pausable: paused");
@@ -226,11 +246,18 @@ describe("Solar Energy IoFy Integration Tests", function () {
       await dividendDistributor.unpause();
       
       // Verify operations work after unpausing
-      await registry.registerPanel("SN003", "SolarCorp", 5000);
+      await registry.registerPanelByFactory(
+        "SN003",
+        "SolarCorp",
+        "Panel 3",
+        "Location 3",
+        5000,
+        owner.address
+      );
       
       // Verify the panel was registered
       const panelId3 = await registry.serialNumberToId("SN003");
-      const panel3 = await registry.getPanelDetails(panelId3);
+      const panel3 = await registry.panels(panelId3);
       expect(panel3.serialNumber).to.equal("SN003");
     });
   });

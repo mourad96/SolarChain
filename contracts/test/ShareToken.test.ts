@@ -9,7 +9,7 @@ describe("ShareToken", function () {
   let owner: SignerWithAddress;
   let user1: SignerWithAddress;
   let user2: SignerWithAddress;
-  let panelId: number;
+  let panelId: bigint;
   
   const ADMIN_ROLE = ethers.keccak256(ethers.toUtf8Bytes("ADMIN_ROLE"));
   const FACTORY_ROLE = ethers.keccak256(ethers.toUtf8Bytes("FACTORY_ROLE"));
@@ -39,30 +39,17 @@ describe("ShareToken", function () {
     // Grant MINTER_ROLE to owner
     await shareToken.grantRole(MINTER_ROLE, owner.address);
     
-    // Register a panel
-    const tx = await solarPanelRegistry.registerPanelAsset(
+    // Register a test panel
+    await solarPanelRegistry.registerPanelByFactory(
+      "TEST001",
+      "TestManufacturer",
       "Test Panel",
       "Test Location",
-      5000 // 5kW
+      5000,
+      owner.address
     );
     
-    const receipt = await tx.wait();
-    
-    if (receipt) {
-      // Find the PanelRegistered event to get the panelId
-      const logs = receipt.logs;
-      const parsedLogs = logs.map(log => {
-        try {
-          return solarPanelRegistry.interface.parseLog(log);
-        } catch (e) {
-          return null;
-        }
-      }).filter(log => log !== null && log.name === 'PanelRegistered');
-      
-      if (parsedLogs.length > 0 && parsedLogs[0]?.args) {
-        panelId = parsedLogs[0].args.panelId;
-      }
-    }
+    panelId = await solarPanelRegistry.serialNumberToId("TEST001");
   });
 
   describe("Deployment", function () {
@@ -89,33 +76,41 @@ describe("ShareToken", function () {
       expect(await shareToken.getPanelBalance(panelId, owner.address)).to.equal(amount);
     });
     
-    it("Should not allow minting shares for a non-existent panel", async function () {
-      const nonExistentPanelId = 9999;
-      const amount = ethers.parseEther("1000");
-      
+    it("should not allow minting shares for non-existent panel", async function () {
+      const nonExistentPanelId = 999n;
       await expect(
-        shareToken.mintShares(nonExistentPanelId, amount)
+        shareToken.mintShares(nonExistentPanelId, ethers.parseEther("100"))
       ).to.be.revertedWith("Panel does not exist");
     });
     
-    it("Should not allow minting shares for an inactive panel", async function () {
-      // Set panel to inactive
-      await solarPanelRegistry.setPanelStatus(panelId, false);
+    it("should not allow minting shares for inactive panel", async function () {
+      // Register a panel
+      await solarPanelRegistry.registerPanelByFactory(
+        "TEST002",
+        "TestManufacturer",
+        "Test Panel",
+        "Test Location",
+        5000,
+        owner.address
+      );
       
-      const amount = ethers.parseEther("1000");
+      const inactivePanelId = await solarPanelRegistry.serialNumberToId("TEST002");
+      
+      // Deactivate the panel
+      await solarPanelRegistry.setPanelStatus(inactivePanelId, false);
       
       await expect(
-        shareToken.mintShares(panelId, amount)
+        shareToken.mintShares(inactivePanelId, ethers.parseEther("100"))
       ).to.be.revertedWith("Panel is not active");
     });
     
-    it("Should not allow minting shares twice for the same panel", async function () {
-      const amount = ethers.parseEther("1000");
+    it("should not allow minting shares for already minted panel", async function () {
+      // First mint
+      await shareToken.mintShares(panelId, ethers.parseEther("1000"));
       
-      await shareToken.mintShares(panelId, amount);
-      
+      // Try to mint again
       await expect(
-        shareToken.mintShares(panelId, amount)
+        shareToken.mintShares(panelId, ethers.parseEther("1000"))
       ).to.be.revertedWith("Shares already minted for this panel");
     });
     
@@ -125,6 +120,13 @@ describe("ShareToken", function () {
       await expect(
         shareToken.connect(user1).mintShares(panelId, amount)
       ).to.be.revertedWith("AccessControl: account " + user1.address.toLowerCase() + " is missing role " + MINTER_ROLE);
+    });
+
+    it("should emit SharesMinted event", async function () {
+      const amount = ethers.parseEther("1000");
+      await expect(shareToken.mintShares(panelId, amount))
+        .to.emit(shareToken, "SharesMinted")
+        .withArgs(panelId, amount);
     });
   });
 
@@ -169,34 +171,21 @@ describe("ShareToken", function () {
     });
     
     it("Should not allow transferring shares for non-minted panel", async function () {
-      // Register a new panel
-      const tx = await solarPanelRegistry.registerPanelAsset(
-        "Another Panel",
-        "Another Location",
-        6000
+      // Register a new panel without minting shares
+      await solarPanelRegistry.registerPanelByFactory(
+        "TEST003",
+        "TestManufacturer",
+        "Test Panel",
+        "Test Location",
+        5000,
+        owner.address
       );
       
-      const receipt = await tx.wait();
-      if (receipt) {
-        // Find the PanelRegistered event to get the panelId
-        const logs = receipt.logs;
-        const parsedLogs = logs.map(log => {
-          try {
-            return solarPanelRegistry.interface.parseLog(log);
-          } catch (e) {
-            return null;
-          }
-        }).filter(log => log !== null && log.name === 'PanelRegistered');
-        
-        if (parsedLogs.length > 0 && parsedLogs[0]?.args) {
-          const newPanelId = parsedLogs[0].args.panelId;
-          
-          // Try to transfer shares for this panel
-          await expect(
-            shareToken.transferPanelShares(newPanelId, user1.address, ethers.parseEther("100"))
-          ).to.be.revertedWith("Shares not minted for this panel");
-        }
-      }
+      const nonMintedPanelId = await solarPanelRegistry.serialNumberToId("TEST003");
+      
+      await expect(
+        shareToken.transferPanelShares(nonMintedPanelId, user1.address, ethers.parseEther("100"))
+      ).to.be.revertedWith("Shares not minted for this panel");
     });
   });
 

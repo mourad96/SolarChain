@@ -45,8 +45,9 @@ contract ShareToken is ERC20, AccessControl, Pausable {
         require(amount > 0, "Amount must be greater than 0");
         require(!panelTokens[panelId].isMinted, "Shares already minted for this panel");
         
-        // Verify panel exists and is active in the panel registry
-        (,,,,,address owner, bool isActive,) = panelRegistry.getPanelDetails(panelId);
+        // Get panel details
+        (string memory serialNumber, , , , , address owner, bool isActive, ) = panelRegistry.panels(panelId);
+        require(bytes(serialNumber).length > 0, "Panel does not exist");
         require(isActive, "Panel is not active");
         
         panelTokens[panelId] = TokenDetails({
