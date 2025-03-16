@@ -78,12 +78,13 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="md:flex md:items-center md:justify-between">
-        <div className="flex-1 min-w-0">
-          <h2 className="text-2xl font-bold leading-7 text-gray-900 sm:text-3xl sm:truncate">
-            Welcome back, {user?.name}
-          </h2>
-        </div>
+      <div className="bg-gradient-to-r from-blue-50 to-white p-4 rounded-lg shadow-sm mb-6">
+        <h2 className="text-3xl font-bold text-gray-900 mb-2">
+          Welcome back, {user?.name}
+        </h2>
+        <p className="text-sm text-gray-600">
+          Here's an overview of your solar energy investments and activities
+        </p>
       </div>
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">

@@ -1,12 +1,11 @@
 import { Request } from 'express';
 import { JwtPayload } from 'jsonwebtoken';
 
-export interface User extends JwtPayload {
+export interface User {
   id: string;
-  userId: string;
   email: string;
   name: string;
-  role: 'user' | 'admin';
+  role: 'owner' | 'investor';
   walletAddress?: string;
 }
 

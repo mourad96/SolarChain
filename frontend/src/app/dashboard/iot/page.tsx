@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import toast from 'react-hot-toast';
+import DashboardHeader from '@/components/dashboard/DashboardHeader';
 
 interface IoTDevice {
   id: string;
@@ -113,20 +114,17 @@ export default function IoTPage() {
 
   return (
     <div className="space-y-6">
-      <div className="sm:flex sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">IoT Monitoring</h2>
-          <p className="mt-1 text-sm text-gray-500">
-            Monitor your solar panel IoT devices and energy production data
-          </p>
-        </div>
-      </div>
+      <DashboardHeader 
+        title="IoT Monitoring" 
+        description="Monitor your solar panel IoT devices and energy production data"
+        role="owner"
+      />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
         <div className="lg:col-span-1">
-          <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-            <div className="px-4 py-5 sm:px-6">
-              <h3 className="text-lg leading-6 font-medium text-gray-900">
+          <div className="bg-white shadow-md rounded-lg overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-4">
+              <h3 className="text-lg font-medium text-white">
                 IoT Devices
               </h3>
             </div>
@@ -135,8 +133,8 @@ export default function IoTPage() {
                 {devices.map((device) => (
                   <li
                     key={device.id}
-                    className={`px-4 py-4 cursor-pointer hover:bg-gray-50 ${
-                      selectedDevice === device.id ? 'bg-gray-50' : ''
+                    className={`px-4 py-4 cursor-pointer hover:bg-gray-50 transition-colors ${
+                      selectedDevice === device.id ? 'bg-blue-50 border-l-4 border-blue-500' : ''
                     }`}
                     onClick={() => setSelectedDevice(device.id)}
                   >
@@ -167,20 +165,20 @@ export default function IoTPage() {
         </div>
 
         <div className="lg:col-span-3">
-          <div className="bg-white shadow sm:rounded-lg">
-            <div className="px-4 py-5 sm:px-6 flex justify-between items-center">
-              <h3 className="text-lg leading-6 font-medium text-gray-900">
+          <div className="bg-white shadow-md rounded-lg overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-4 flex justify-between items-center">
+              <h3 className="text-lg font-medium text-white">
                 Energy Production Data
               </h3>
-              <div className="flex space-x-2">
+              <div className="flex space-x-1 bg-blue-400 bg-opacity-30 rounded-lg p-1">
                 {(['1h', '24h', '7d', '30d'] as const).map((range) => (
                   <button
                     key={range}
                     onClick={() => setTimeRange(range)}
-                    className={`px-3 py-1 text-sm font-medium rounded-md ${
+                    className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
                       timeRange === range
-                        ? 'bg-primary-100 text-primary-700'
-                        : 'text-gray-500 hover:text-gray-700'
+                        ? 'bg-white text-blue-700'
+                        : 'text-white hover:bg-blue-400'
                     }`}
                   >
                     {range}
@@ -203,7 +201,7 @@ export default function IoTPage() {
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                         {readings.length > 0 && (
                           <>
-                            <div className="bg-white p-4 rounded-md shadow-sm">
+                            <div className="bg-white p-4 rounded-md shadow-sm border-l-4 border-green-500">
                               <p className="text-sm text-gray-500">
                                 Energy Output
                               </p>
@@ -211,20 +209,26 @@ export default function IoTPage() {
                                 {readings[0].energyOutput.toFixed(2)} W
                               </p>
                             </div>
-                            <div className="bg-white p-4 rounded-md shadow-sm">
-                              <p className="text-sm text-gray-500">Temperature</p>
+                            <div className="bg-white p-4 rounded-md shadow-sm border-l-4 border-red-500">
+                              <p className="text-sm text-gray-500">
+                                Temperature
+                              </p>
                               <p className="text-2xl font-semibold text-gray-900">
                                 {readings[0].temperature.toFixed(1)}°C
                               </p>
                             </div>
-                            <div className="bg-white p-4 rounded-md shadow-sm">
-                              <p className="text-sm text-gray-500">Voltage</p>
+                            <div className="bg-white p-4 rounded-md shadow-sm border-l-4 border-yellow-500">
+                              <p className="text-sm text-gray-500">
+                                Voltage
+                              </p>
                               <p className="text-2xl font-semibold text-gray-900">
                                 {readings[0].voltage.toFixed(1)} V
                               </p>
                             </div>
-                            <div className="bg-white p-4 rounded-md shadow-sm">
-                              <p className="text-sm text-gray-500">Current</p>
+                            <div className="bg-white p-4 rounded-md shadow-sm border-l-4 border-blue-500">
+                              <p className="text-sm text-gray-500">
+                                Current
+                              </p>
                               <p className="text-2xl font-semibold text-gray-900">
                                 {readings[0].current.toFixed(2)} A
                               </p>
@@ -257,7 +261,7 @@ export default function IoTPage() {
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
                           {readings.map((reading) => (
-                            <tr key={reading.id}>
+                            <tr key={reading.id} className="hover:bg-gray-50">
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                 {new Date(reading.timestamp).toLocaleString()}
                               </td>

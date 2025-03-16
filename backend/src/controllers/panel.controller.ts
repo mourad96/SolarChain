@@ -12,11 +12,11 @@ let wallet: ethers.Wallet | undefined;
 let assetRegistry: ReturnType<typeof AssetRegistry__factory.connect> | undefined;
 
 try {
-  if (config.blockchain.rpcUrl && config.blockchain.privateKey && config.blockchain.contracts.assetRegistry) {
+  if (config.blockchain.rpcUrl && config.blockchain.privateKey && config.blockchain.contracts.solarPanelRegistry) {
     provider = new ethers.JsonRpcProvider(config.blockchain.rpcUrl);
     wallet = new ethers.Wallet(config.blockchain.privateKey, provider);
     assetRegistry = AssetRegistry__factory.connect(
-      config.blockchain.contracts.assetRegistry,
+      config.blockchain.contracts.solarPanelRegistry,
       wallet
     );
   } else {
@@ -104,9 +104,9 @@ export const updatePanel = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Check ownership
-    if (panel.ownerId !== userId && (req as any).user.role !== 'admin') {
-      res.status(403).json({ message: 'Not authorized' });
+    // Check if user is the owner
+    if (panel.ownerId !== userId) {
+      res.status(403).json({ message: 'You do not have permission to update this panel' });
       return;
     }
 
@@ -216,9 +216,9 @@ export const setPanelStatus = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    // Check ownership
-    if (panel.ownerId !== userId && (req as any).user.role !== 'admin') {
-      res.status(403).json({ message: 'Not authorized' });
+    // Check if user is the owner
+    if (panel.ownerId !== userId) {
+      res.status(403).json({ message: 'You do not have permission to update this panel' });
       return;
     }
 
@@ -378,11 +378,20 @@ export class PanelController {
       } catch (blockchainError) {
         logger.error('Failed to register panel on blockchain:', blockchainError);
         
+        let errorMessage = 'Blockchain registration failed. Will retry later.';
+        let errorCode = 'BLOCKCHAIN_ERROR';
+        
+        if (blockchainError.message.includes('not properly initialized')) {
+          errorMessage = 'Blockchain service is not properly configured. Please contact support.';
+          errorCode = 'BLOCKCHAIN_NOT_CONFIGURED';
+        }
+        
         // Even if blockchain registration fails, we keep the panel in our database
         return res.status(201).json({ 
           panel,
-          warning: 'Panel created but blockchain registration failed. Will retry later.',
-          error: blockchainError.message
+          warning: `Panel created but ${errorMessage}`,
+          error: blockchainError.message,
+          errorCode
         });
       }
     } catch (error) {
@@ -431,25 +440,38 @@ export class PanelController {
         return res.status(400).json({ error: 'User has not connected a wallet' });
       }
 
-      // Get panels from blockchain
-      const panelSerialNumbers = await blockchainService.getOwnerPanels(user.walletAddress);
-      
-      // Get details for each panel
-      const panelDetails = await Promise.all(
-        panelSerialNumbers.map(async (serialNumber) => {
-          try {
-            return await blockchainService.getPanelFromBlockchain(serialNumber);
-          } catch (error) {
-            logger.error('Error fetching panel details:', { serialNumber, error });
-            return null;
-          }
-        })
-      );
+      try {
+        // Get panels from blockchain
+        const panelSerialNumbers = await blockchainService.getOwnerPanels(user.walletAddress);
+        
+        // Get details for each panel
+        const panelDetails = await Promise.all(
+          panelSerialNumbers.map(async (serialNumber) => {
+            try {
+              return await blockchainService.getPanelFromBlockchain(serialNumber);
+            } catch (error) {
+              logger.error('Error fetching panel details:', { serialNumber, error });
+              return null;
+            }
+          })
+        );
 
-      // Filter out any failed fetches
-      const validPanels = panelDetails.filter(panel => panel !== null);
+        // Filter out any failed fetches
+        const validPanels = panelDetails.filter(panel => panel !== null);
 
-      return res.json(validPanels);
+        return res.json(validPanels);
+      } catch (blockchainError) {
+        logger.error('Blockchain service error:', blockchainError);
+        
+        if (blockchainError.message.includes('not properly initialized')) {
+          return res.status(503).json({ 
+            error: 'Blockchain service unavailable', 
+            message: 'The blockchain service is not properly configured. Please contact support.'
+          });
+        }
+        
+        throw blockchainError; // Re-throw to be caught by the outer catch block
+      }
     } catch (error) {
       logger.error('Get blockchain panels error:', error);
       return res.status(500).json({ error: 'Failed to fetch blockchain panels' });
@@ -469,6 +491,7 @@ export class PanelController {
               id: true,
               name: true,
               email: true,
+              walletAddress: true,
             },
           },
           devices: true,
@@ -479,23 +502,23 @@ export class PanelController {
         return res.status(404).json({ error: 'Panel not found' });
       }
 
-      // Check if user is the owner or an admin
-      if (panel.ownerId !== userId && (req as any).user.role !== 'admin') {
-        return res.status(403).json({ error: 'Not authorized to view this panel' });
+      // Check if user is the owner
+      if (panel.ownerId !== userId) {
+        return res.status(403).json({ error: 'You do not have permission to view this panel' });
       }
 
       return res.json(panel);
     } catch (error) {
-      logger.error('Get panel details error:', error);
-      return res.status(500).json({ error: 'Failed to fetch panel details' });
+      logger.error('Error getting panel details:', error);
+      return res.status(500).json({ error: 'Failed to get panel details' });
     }
   }
 
   public async updatePanel(req: Request, res: Response) {
     try {
       const { panelId } = req.params;
-      const { name, location, capacity } = req.body;
       const userId = (req as any).user.id;
+      const { name, location, capacity } = req.body;
 
       // Check if panel exists
       const panel = await prismaClient.panel.findUnique({
@@ -506,36 +529,24 @@ export class PanelController {
         return res.status(404).json({ error: 'Panel not found' });
       }
 
-      // Check if user is the owner or an admin
-      if (panel.ownerId !== userId && (req as any).user.role !== 'admin') {
-        return res.status(403).json({ error: 'Not authorized to update this panel' });
+      // Check if user is the owner
+      if (panel.ownerId !== userId) {
+        return res.status(403).json({ error: 'You do not have permission to update this panel' });
       }
 
       // Update panel
       const updatedPanel = await prismaClient.panel.update({
         where: { id: panelId },
         data: {
-          name: name || panel.name,
-          location: location || panel.location,
-          capacity: capacity !== undefined ? capacity : panel.capacity,
-        },
-        include: {
-          owner: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
+          ...(name && { name }),
+          ...(location && { location }),
+          ...(capacity && { capacity }),
         },
       });
 
-      return res.json({
-        message: 'Panel updated successfully',
-        panel: updatedPanel,
-      });
+      return res.json(updatedPanel);
     } catch (error) {
-      logger.error('Update panel error:', error);
+      logger.error('Error updating panel:', error);
       return res.status(500).json({ error: 'Failed to update panel' });
     }
   }
@@ -543,8 +554,8 @@ export class PanelController {
   public async setPanelStatus(req: Request, res: Response) {
     try {
       const { panelId } = req.params;
-      const { status } = req.body;
       const userId = (req as any).user.id;
+      const { status } = req.body;
 
       // Check if panel exists
       const panel = await prismaClient.panel.findUnique({
@@ -555,38 +566,124 @@ export class PanelController {
         return res.status(404).json({ error: 'Panel not found' });
       }
 
-      // Check if user is the owner or an admin
-      if (panel.ownerId !== userId && (req as any).user.role !== 'admin') {
-        return res.status(403).json({ error: 'Not authorized to update this panel' });
-      }
-
-      // Validate status
-      if (!['active', 'inactive', 'maintenance'].includes(status)) {
-        return res.status(400).json({ error: 'Invalid status value' });
+      // Check if user is the owner
+      if (panel.ownerId !== userId) {
+        return res.status(403).json({ error: 'You do not have permission to update this panel' });
       }
 
       // Update panel status
       const updatedPanel = await prismaClient.panel.update({
         where: { id: panelId },
         data: { status },
-        include: {
-          owner: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
-        },
       });
 
-      return res.json({
-        message: 'Panel status updated successfully',
-        panel: updatedPanel,
-      });
+      return res.json(updatedPanel);
     } catch (error) {
-      logger.error('Set panel status error:', error);
+      logger.error('Error updating panel status:', error);
       return res.status(500).json({ error: 'Failed to update panel status' });
+    }
+  }
+
+  public async createPanelsBatch(req: Request, res: Response) {
+    try {
+      const { panels } = req.body;
+      const userId = (req as any).user.id;
+
+      if (!Array.isArray(panels) || panels.length === 0) {
+        return res.status(400).json({ error: 'Invalid panels data. Expected non-empty array.' });
+      }
+
+      // Get user
+      const user = await prismaClient.user.findUnique({
+        where: { id: userId }
+      });
+
+      if (!user) {
+        return res.status(400).json({ error: 'User not found' });
+      }
+
+      // Create panels in database
+      const createdPanels = await Promise.all(
+        panels.map(async (panelData) => {
+          return await prismaClient.panel.create({
+            data: {
+              name: panelData.name,
+              location: panelData.location || 'Unknown',
+              capacity: panelData.capacity,
+              status: 'active',
+              owner: {
+                connect: { id: userId }
+              }
+            }
+          });
+        })
+      );
+
+      // Try blockchain registration if user has wallet address
+      let blockchainTxHash: string | null = null;
+      let blockchainError: any = null;
+      
+      if (user.walletAddress) {
+        try {
+          blockchainTxHash = await blockchainService.registerPanelsBatch(createdPanels);
+          
+          // Update panels with blockchain transaction hash
+          await Promise.all(
+            createdPanels.map(async (panel) => {
+              await prismaClient.panel.update({
+                where: { id: panel.id },
+                data: { 
+                  blockchainTxHash 
+                } as any
+              });
+            })
+          );
+        } catch (error) {
+          blockchainError = error;
+          logger.error('Error registering panels on blockchain:', error);
+          
+          // Clear blockchain transaction hash for failed registrations
+          await Promise.all(
+            createdPanels.map(async (panel) => {
+              await prismaClient.panel.update({
+                where: { id: panel.id },
+                data: { 
+                  blockchainTxHash: null 
+                } as any
+              });
+            })
+          );
+        }
+      }
+
+      const response: any = {
+        message: 'Panels created successfully',
+        panels: createdPanels
+      };
+      
+      if (blockchainTxHash) {
+        response.blockchainTxHash = blockchainTxHash;
+        response.blockchainStatus = 'REGISTERED';
+      } else if (blockchainError) {
+        let errorMessage = 'Blockchain registration failed. Will retry later.';
+        let errorCode = 'BLOCKCHAIN_ERROR';
+        
+        if (blockchainError.message && blockchainError.message.includes('not properly initialized')) {
+          errorMessage = 'Blockchain service is not properly configured. Please contact support.';
+          errorCode = 'BLOCKCHAIN_NOT_CONFIGURED';
+        }
+        
+        response.warning = `Panels created but ${errorMessage}`;
+        response.error = blockchainError.message;
+        response.errorCode = errorCode;
+      } else if (user.walletAddress) {
+        response.warning = 'Panels created but blockchain registration was not attempted.';
+      }
+
+      return res.status(201).json(response);
+    } catch (error) {
+      logger.error('Create panels batch error:', error);
+      return res.status(500).json({ error: 'Failed to create panels' });
     }
   }
 } 

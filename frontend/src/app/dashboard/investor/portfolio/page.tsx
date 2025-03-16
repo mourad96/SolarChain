@@ -1,23 +1,45 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import DashboardHeader from '@/components/dashboard/DashboardHeader';
 
 export default function InvestorPortfolioPage() {
   const router = useRouter();
+  const [isRedirecting, setIsRedirecting] = useState(false);
 
   useEffect(() => {
-    // Use a more reliable redirection method with a small delay
-    const redirectTimer = setTimeout(() => {
-      window.location.href = '/dashboard/portfolio';
-    }, 100);
-    
-    return () => clearTimeout(redirectTimer);
-  }, []);
+    // Simulate redirect after 1 second
+    if (!isRedirecting) {
+      const timer = setTimeout(() => {
+        setIsRedirecting(true);
+        router.push("/dashboard/portfolio");
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [isRedirecting, router]);
 
   return (
-    <div className="flex items-center justify-center h-64">
-      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-600"></div>
+    <div className="space-y-6">
+      <DashboardHeader
+        title="Portfolio"
+        description="Track your investment portfolio and performance metrics"
+        role="investor"
+      />
+      
+      <div className="bg-white shadow-md rounded-lg overflow-hidden">
+        <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-4">
+          <h3 className="text-lg font-medium text-white">
+            Portfolio Overview
+          </h3>
+        </div>
+        <div className="p-6">
+          <div className="flex flex-col items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600 mb-4"></div>
+            <p className="text-gray-600">Redirecting to Portfolio page...</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 } 

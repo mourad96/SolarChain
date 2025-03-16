@@ -20,6 +20,12 @@ router.post(
       .trim()
       .isLength({ min: 8 })
       .withMessage('Password must be at least 8 characters long'),
+    body('role')
+      .trim()
+      .notEmpty()
+      .withMessage('Role is required')
+      .isIn(['owner', 'investor'])
+      .withMessage('Role must be either "owner" or "investor"'),
   ],
   validateRequest as any,
   async (req: Request, res: Response): Promise<void> => {
@@ -36,6 +42,11 @@ router.post(
       .isEmail()
       .withMessage('Please provide a valid email address'),
     body('password').trim().notEmpty().withMessage('Password is required'),
+    body('role')
+      .optional()
+      .trim()
+      .isIn(['owner', 'investor'])
+      .withMessage('Role must be either "owner" or "investor"'),
   ],
   validateRequest as any,
   async (req: Request, res: Response): Promise<void> => {
@@ -44,9 +55,13 @@ router.post(
 );
 
 // Get current user route
-router.get('/me', requireAuth as any, async (req: Request, res: Response): Promise<void> => {
-  await authController.getCurrentUser(req, res);
-});
+router.get(
+  '/me',
+  requireAuth,
+  async (req: Request, res: Response): Promise<void> => {
+    await authController.getCurrentUser(req, res);
+  }
+);
 
 // Connect wallet route
 router.post(
@@ -75,4 +90,4 @@ router.post('/update-wallet', requireAuth as any, authController.updateWalletAdd
 // Get profile route
 router.get('/profile', requireAuth as any, authController.getProfile.bind(authController));
 
-export { router as authRouter }; 
+export const authRouter = router; 

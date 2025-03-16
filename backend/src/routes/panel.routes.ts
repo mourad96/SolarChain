@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
-import { requireAuth, requireRole } from '../middleware/auth.middleware';
+import { requireAuth, requireOwner } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validate-request';
 import { PanelController } from '../controllers/panel.controller';
 
@@ -20,6 +20,22 @@ router.post(
   ],
   validateRequest as any,
   panelController.createPanel.bind(panelController)
+);
+
+// Create panels batch route
+router.post(
+  '/batch',
+  requireAuth as any,
+  [
+    body('panels').isArray().withMessage('Panels must be an array'),
+    body('panels.*.name').trim().notEmpty().withMessage('Name is required for all panels'),
+    body('panels.*.location').trim().notEmpty().withMessage('Location is required for all panels'),
+    body('panels.*.capacity')
+      .isFloat({ min: 0 })
+      .withMessage('Capacity must be a positive number for all panels'),
+  ],
+  validateRequest as any,
+  panelController.createPanelsBatch.bind(panelController)
 );
 
 // List panels route
@@ -46,8 +62,7 @@ router.get(
 // Update panel
 router.put(
   '/:panelId',
-  requireAuth as any,
-  requireRole(['admin', 'panel_owner']) as any,
+  requireOwner as any,
   [
     body('name').optional().trim().notEmpty().withMessage('Name cannot be empty'),
     body('location').optional().trim().notEmpty().withMessage('Location cannot be empty'),
@@ -63,8 +78,7 @@ router.put(
 // Update panel status
 router.patch(
   '/:panelId/status',
-  requireAuth as any,
-  requireRole(['admin', 'panel_owner']) as any,
+  requireOwner as any,
   [
     body('status')
       .isIn(['active', 'inactive', 'maintenance'])

@@ -48,8 +48,9 @@ export const mintTokens = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    if (panel.owner.id !== userId && (req as any).user.role !== 'admin') {
-      res.status(403).json({ message: 'Not authorized' });
+    // Check if user is the owner of the panel
+    if (panel.owner.id !== userId) {
+      res.status(403).json({ error: 'You do not have permission to mint tokens for this panel' });
       return;
     }
 

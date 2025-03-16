@@ -9,9 +9,14 @@ const prisma = new PrismaClient();
 export class AuthController {
   public async register(req: Request, res: Response) {
     try {
-      const { name, email, password } = req.body;
+      const { name, email, password, role } = req.body;
 
-      logger.info('Registration attempt:', { email, name });
+      logger.info('Registration attempt:', { email, name, role });
+
+      // Validate role
+      if (!role || !['owner', 'investor'].includes(role)) {
+        return res.status(400).json({ error: 'Invalid role. Must be either "owner" or "investor"' });
+      }
 
       // Check if user exists
       const existingUser = await prisma.user.findUnique({
@@ -26,13 +31,16 @@ export class AuthController {
       // Hash password
       const hashedPassword = await bcrypt.hash(password, 10);
 
+      // Map role string to enum
+      const dbRole = role.toUpperCase() === 'OWNER' ? 'OWNER' : 'INVESTOR';
+
       // Create user
       const user = await prisma.user.create({
         data: {
           name,
           email,
           password: hashedPassword,
-          role: 'user',
+          role: dbRole,
         },
         select: {
           id: true,
@@ -42,15 +50,24 @@ export class AuthController {
         },
       });
 
+      // Map role enum back to lowercase for the client
+      const clientRole = user.role === 'OWNER' ? 'owner' : 'investor';
+
       // Generate JWT
       const token = jwt.sign(
-        { id: user.id, email: user.email, role: user.role },
+        { id: user.id, email: user.email, role: clientRole },
         process.env.JWT_SECRET!,
         { expiresIn: '24h' }
       );
 
-      logger.info('User registered successfully:', { userId: user.id, email });
-      return res.status(201).json({ user, token });
+      logger.info('User registered successfully:', { userId: user.id, email, role });
+      return res.status(201).json({ 
+        user: {
+          ...user,
+          role: clientRole
+        }, 
+        token 
+      });
     } catch (error) {
       logger.error('Registration error:', error);
       console.error('Registration error details:', error);
@@ -63,7 +80,7 @@ export class AuthController {
 
   public async login(req: Request, res: Response) {
     try {
-      const { email, password } = req.body;
+      const { email, password, role } = req.body;
 
       // Find user
       const user = await prisma.user.findUnique({
@@ -80,9 +97,19 @@ export class AuthController {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
+      // Map role enum to lowercase for comparison and client
+      const clientRole = user.role === 'OWNER' ? 'owner' : 'investor';
+
+      // Verify role if specified
+      if (role && clientRole !== role) {
+        return res.status(403).json({ 
+          error: `This account is not registered as a ${role}. Please login with the correct account type.` 
+        });
+      }
+
       // Generate JWT
       const token = jwt.sign(
-        { id: user.id, email: user.email, role: user.role },
+        { id: user.id, email: user.email, role: clientRole },
         process.env.JWT_SECRET!,
         { expiresIn: '24h' }
       );
@@ -92,7 +119,7 @@ export class AuthController {
           id: user.id,
           name: user.name,
           email: user.email,
-          role: user.role,
+          role: clientRole,
           walletAddress: user.walletAddress,
         },
         token,
@@ -105,24 +132,30 @@ export class AuthController {
 
   public async getCurrentUser(req: Request, res: Response) {
     try {
-      const userId = (req as any).user.id;
+      if (!req.user || !req.user.id) {
+        return res.status(401).json({ error: 'Not authenticated' });
+      }
 
       const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          role: true,
-          walletAddress: true,
-        },
+        where: { id: req.user.id },
       });
 
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
       }
 
-      return res.json({ user });
+      // Map role enum to lowercase for client
+      const clientRole = user.role === 'OWNER' ? 'owner' : 'investor';
+
+      return res.json({
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: clientRole,
+          walletAddress: user.walletAddress,
+        },
+      });
     } catch (error) {
       console.error('Get current user error:', error);
       return res.status(500).json({ error: 'Failed to get user information' });
@@ -158,10 +191,23 @@ export class AuthController {
     try {
       const userId = (req as any).user.id;
 
-      // Update user's role to panel_owner
-      const user = await prisma.user.update({
+      // Check if user is already an owner
+      const user = await prisma.user.findUnique({
         where: { id: userId },
-        data: { role: 'panel_owner' },
+      });
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      if (user.role === 'OWNER') {
+        return res.status(400).json({ error: 'User is already a panel owner' });
+      }
+
+      // Update user's role to owner
+      const updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: { role: 'OWNER' },
         select: {
           id: true,
           name: true,
@@ -171,14 +217,23 @@ export class AuthController {
         },
       });
 
+      // Map role enum to lowercase for client
+      const clientRole = updatedUser.role === 'OWNER' ? 'owner' : 'investor';
+
       // Generate new JWT with updated role
       const token = jwt.sign(
-        { id: user.id, email: user.email, role: user.role },
+        { id: updatedUser.id, email: updatedUser.email, role: clientRole },
         process.env.JWT_SECRET!,
         { expiresIn: '24h' }
       );
 
-      return res.json({ user, token });
+      return res.json({ 
+        user: {
+          ...updatedUser,
+          role: clientRole
+        }, 
+        token 
+      });
     } catch (error) {
       console.error('Become panel owner error:', error);
       return res.status(500).json({ error: 'Failed to upgrade to panel owner' });
@@ -218,9 +273,15 @@ export class AuthController {
       });
       console.log('User updated successfully:', user);
 
+      // Map role enum to lowercase for client
+      const clientRole = user.role === 'OWNER' ? 'owner' : 'investor';
+
       return res.json({ 
         message: 'Wallet address updated successfully',
-        user 
+        user: {
+          ...user,
+          role: clientRole
+        }
       });
     } catch (error) {
       console.error('Update wallet address error:', error);
@@ -248,7 +309,13 @@ export class AuthController {
         return res.status(404).json({ error: 'User not found' });
       }
 
-      return res.json(user);
+      // Map role enum to lowercase for client
+      const clientRole = user.role === 'OWNER' ? 'owner' : 'investor';
+
+      return res.json({
+        ...user,
+        role: clientRole
+      });
     } catch (error) {
       console.error('Get profile error:', error);
       return res.status(500).json({ error: 'Failed to get user profile' });

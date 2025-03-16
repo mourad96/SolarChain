@@ -2,8 +2,21 @@
 
 import { ReactNode, useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { toast } from 'react-hot-toast';
+import { useAuthContext } from '@/context/AuthContext';
+
+// Define a more specific interface for Ethereum provider
+declare global {
+  interface Window {
+    ethereum?: {
+      isMetaMask?: boolean;
+      request: (args: { method: string; params?: any[] }) => Promise<any>;
+      on: (eventName: string, callback: (...args: any[]) => void) => void;
+      removeListener: (eventName: string, callback: (...args: any[]) => void) => void;
+    };
+  }
+}
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -12,20 +25,22 @@ interface DashboardLayoutProps {
 
 export default function DashboardLayout({ children, role }: DashboardLayoutProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user } = useAuthContext();
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
 
   const ownerNavItems = [
     { name: 'Overview', href: '/dashboard/owner' },
-    { name: 'Solar Panels', href: '/dashboard/owner/panels' },
-    { name: 'Dividends', href: '/dashboard/owner/dividends' },
-    { name: 'IoT Data', href: '/dashboard/owner/iot' },
+    { name: 'Solar Panels', href: '/dashboard/panels' },
+    { name: 'Dividends', href: '/dashboard/tokens' },
+    { name: 'IoT Data', href: '/dashboard/iot' },
   ];
 
   const investorNavItems = [
     { name: 'Overview', href: '/dashboard/investor' },
-    { name: 'Projects', href: '/dashboard/investor/projects' },
-    { name: 'Portfolio', href: '/dashboard/investor/portfolio' },
+    { name: 'Projects', href: '/dashboard/projects' },
+    { name: 'Portfolio', href: '/dashboard/portfolio' },
   ];
 
   const navItems = role === 'owner' ? ownerNavItems : investorNavItems;
@@ -67,6 +82,7 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
     try {
       if (!window.ethereum) {
         toast.error('Please install MetaMask to connect your wallet');
+        setIsConnectingWallet(false);
         return;
       }
 
@@ -76,6 +92,7 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
       const token = localStorage.getItem('token');
       if (!token) {
         toast.error('Authentication token not found. Please log in again.');
+        setIsConnectingWallet(false);
         return;
       }
 
@@ -110,6 +127,19 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
         setIsConnectingWallet(false);
       }, 1500);
     }
+  };
+
+  const handleLogout = () => {
+    // Clear tokens and wallet address
+    localStorage.removeItem('token');
+    localStorage.removeItem('walletAddress');
+    document.cookie = 'token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    
+    // Show success message
+    toast.success('Logged out successfully');
+    
+    // Use direct navigation to prevent redirect loops
+    window.location.href = '/';
   };
 
   return (
@@ -166,9 +196,12 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
             <button className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200">
               Profile
             </button>
-            <Link href="/" className="rounded-lg bg-red-100 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-200">
+            <button 
+              onClick={handleLogout}
+              className="rounded-lg bg-red-100 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-200"
+            >
               Sign Out
-            </Link>
+            </button>
           </div>
         </header>
 

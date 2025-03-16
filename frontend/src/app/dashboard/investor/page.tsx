@@ -1,6 +1,7 @@
 'use client';
 
 import DashboardLayout from '@/components/layout/DashboardLayout';
+import DashboardHeader from '@/components/dashboard/DashboardHeader';
 import Link from 'next/link';
 
 export default function InvestorDashboard() {
@@ -35,6 +36,12 @@ export default function InvestorDashboard() {
 
   return (
     <DashboardLayout role="investor">
+      <DashboardHeader
+        title="Investor Dashboard"
+        description="Manage your solar energy investments and track your portfolio performance"
+        role="investor"
+      />
+      
       {/* Portfolio Stats */}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {portfolioStats.map((stat) => (
@@ -55,7 +62,7 @@ export default function InvestorDashboard() {
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-medium text-gray-900">Featured Projects</h2>
           <Link
-            href="/dashboard/investor/projects"
+            href="/dashboard/projects"
             className="text-sm font-medium text-blue-600 hover:text-blue-500"
           >
             View All Projects
@@ -118,19 +125,19 @@ export default function InvestorDashboard() {
         <h2 className="text-lg font-medium text-gray-900">Quick Links</h2>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Link
-            href="/dashboard/investor/portfolio"
+            href="/dashboard/portfolio"
             className="flex items-center justify-center rounded-lg bg-purple-50 p-6 text-purple-700 hover:bg-purple-100"
           >
             View Portfolio
           </Link>
           <Link
-            href="/dashboard/investor/projects"
+            href="/dashboard/projects"
             className="flex items-center justify-center rounded-lg bg-green-50 p-6 text-green-700 hover:bg-green-100"
           >
             Browse Projects
           </Link>
           <Link
-            href="/dashboard/investor/transactions"
+            href="/dashboard/investor"
             className="flex items-center justify-center rounded-lg bg-blue-50 p-6 text-blue-700 hover:bg-blue-100"
           >
             Transaction History

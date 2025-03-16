@@ -15,7 +15,7 @@ model User {
   email         String    @unique
   name          String
   password      String
-  role          String    @default("user")
+  role          Role      @default(INVESTOR)
   walletAddress String?
   panels        Panel[]
   createdAt     DateTime  @default(now())
@@ -62,4 +62,9 @@ model IoTReading {
   timestamp    DateTime   @default(now())
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+}
+
+enum Role {
+  OWNER
+  INVESTOR
 } 

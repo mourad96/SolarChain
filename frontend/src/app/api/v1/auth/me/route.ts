@@ -1,29 +1,37 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
 
 export async function GET(request: Request) {
   try {
-    const headersList = headers();
-    const token = headersList.get('Authorization');
+    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
     
     const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/me`, {
       method: 'GET',
       headers: {
-        'Authorization': token || '',
+        'Authorization': `Bearer ${token}`,
       },
     });
 
-    const data = await response.json();
-
     if (!response.ok) {
-      return NextResponse.json(data, { status: response.status });
+      const errorData = await response.json();
+      return NextResponse.json(
+        { error: errorData.error || 'Authentication failed' },
+        { status: response.status }
+      );
     }
 
+    const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error('Auth check error:', error);
+    console.error('Auth error:', error);
     return NextResponse.json(
-      { error: 'Failed to check authentication' },
+      { error: 'Failed to authenticate' },
       { status: 500 }
     );
   }
