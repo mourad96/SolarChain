@@ -1,9 +1,10 @@
 // Script to update .env and README.md with contract addresses
 const fs = require('fs');
 const path = require('path');
+const { ethers, upgrades } = require('hardhat');
 
 // Function to update .env file with contract addresses
-function updateEnvFile(addresses) {
+async function updateEnvFile(addresses) {
   const envPath = path.join(__dirname, '../.env');
   
   // Read current .env file
@@ -15,13 +16,36 @@ function updateEnvFile(addresses) {
     return;
   }
   
+  // Get implementation addresses for upgradeable contracts
+  let implementationAddresses = {};
+  try {
+    implementationAddresses = {
+      registryImpl: await upgrades.erc1967.getImplementationAddress(addresses.registry),
+      factoryImpl: await upgrades.erc1967.getImplementationAddress(addresses.factory),
+      shareTokenImpl: await upgrades.erc1967.getImplementationAddress(addresses.shareToken),
+      dividendDistributorImpl: await upgrades.erc1967.getImplementationAddress(addresses.dividendDistributor)
+    };
+  } catch (error) {
+    console.error('Error getting implementation addresses:', error);
+    implementationAddresses = {
+      registryImpl: 'unknown',
+      factoryImpl: 'unknown',
+      shareTokenImpl: 'unknown',
+      dividendDistributorImpl: 'unknown'
+    };
+  }
+  
   // Create contract addresses section
   const contractAddressesSection = `
 # Contract Addresses (Amoy)
 REGISTRY_ADDRESS=${addresses.registry}
+REGISTRY_IMPLEMENTATION_ADDRESS=${implementationAddresses.registryImpl}
 FACTORY_ADDRESS=${addresses.factory}
+FACTORY_IMPLEMENTATION_ADDRESS=${implementationAddresses.factoryImpl}
 SHARE_TOKEN_ADDRESS=${addresses.shareToken}
+SHARE_TOKEN_IMPLEMENTATION_ADDRESS=${implementationAddresses.shareTokenImpl}
 DIVIDEND_DISTRIBUTOR_ADDRESS=${addresses.dividendDistributor}
+DIVIDEND_DISTRIBUTOR_IMPLEMENTATION_ADDRESS=${implementationAddresses.dividendDistributorImpl}
 MOCK_ERC20_ADDRESS=${addresses.paymentToken}
 `;
   
@@ -45,7 +69,7 @@ MOCK_ERC20_ADDRESS=${addresses.paymentToken}
 }
 
 // Function to update README.md with contract addresses
-function updateReadmeFile(addresses) {
+async function updateReadmeFile(addresses) {
   const readmePath = path.join(__dirname, '../README.md');
   
   // Read current README.md file
@@ -57,17 +81,38 @@ function updateReadmeFile(addresses) {
     return;
   }
   
+  // Get implementation addresses for upgradeable contracts
+  let implementationAddresses = {};
+  try {
+    implementationAddresses = {
+      registryImpl: await upgrades.erc1967.getImplementationAddress(addresses.registry),
+      factoryImpl: await upgrades.erc1967.getImplementationAddress(addresses.factory),
+      shareTokenImpl: await upgrades.erc1967.getImplementationAddress(addresses.shareToken),
+      dividendDistributorImpl: await upgrades.erc1967.getImplementationAddress(addresses.dividendDistributor)
+    };
+  } catch (error) {
+    console.error('Error getting implementation addresses:', error);
+    implementationAddresses = {
+      registryImpl: 'unknown',
+      factoryImpl: 'unknown',
+      shareTokenImpl: 'unknown',
+      dividendDistributorImpl: 'unknown'
+    };
+  }
+  
   // Create deployment info section
   const deploymentInfoSection = `
 ## Deployed Contracts (Amoy Testnet)
 
-| Contract | Address |
-|----------|---------|
-| SolarPanelRegistry | [${addresses.registry}](https://amoy.polygonscan.com/address/${addresses.registry}) |
-| SolarPanelFactory | [${addresses.factory}](https://amoy.polygonscan.com/address/${addresses.factory}) |
-| ShareToken | [${addresses.shareToken}](https://amoy.polygonscan.com/address/${addresses.shareToken}) |
-| DividendDistributor | [${addresses.dividendDistributor}](https://amoy.polygonscan.com/address/${addresses.dividendDistributor}) |
-| MockERC20 (USDC) | [${addresses.paymentToken}](https://amoy.polygonscan.com/address/${addresses.paymentToken}) |
+| Contract | Proxy Address | Implementation Address |
+|----------|---------------|------------------------|
+| SolarPanelRegistry | [${addresses.registry}](https://amoy.polygonscan.com/address/${addresses.registry}) | [${implementationAddresses.registryImpl}](https://amoy.polygonscan.com/address/${implementationAddresses.registryImpl}) |
+| SolarPanelFactory | [${addresses.factory}](https://amoy.polygonscan.com/address/${addresses.factory}) | [${implementationAddresses.factoryImpl}](https://amoy.polygonscan.com/address/${implementationAddresses.factoryImpl}) |
+| ShareToken | [${addresses.shareToken}](https://amoy.polygonscan.com/address/${addresses.shareToken}) | [${implementationAddresses.shareTokenImpl}](https://amoy.polygonscan.com/address/${implementationAddresses.shareTokenImpl}) |
+| DividendDistributor | [${addresses.dividendDistributor}](https://amoy.polygonscan.com/address/${addresses.dividendDistributor}) | [${implementationAddresses.dividendDistributorImpl}](https://amoy.polygonscan.com/address/${implementationAddresses.dividendDistributorImpl}) |
+| MockERC20 (USDC) | [${addresses.paymentToken}](https://amoy.polygonscan.com/address/${addresses.paymentToken}) | N/A (not upgradeable) |
+
+> Note: These contracts are upgradeable using the UUPS proxy pattern. The proxy address is the address you interact with, while the implementation address contains the actual logic.
 
 Last deployed: ${new Date().toISOString()}
 `;
@@ -92,10 +137,10 @@ Last deployed: ${new Date().toISOString()}
 }
 
 // Main function to update files with contract addresses
-function updateFiles(addresses) {
+async function updateFiles(addresses) {
   console.log('Updating files with contract addresses...');
-  updateEnvFile(addresses);
-  updateReadmeFile(addresses);
+  await updateEnvFile(addresses);
+  await updateReadmeFile(addresses);
   console.log('Files updated successfully!');
 }
 
@@ -120,5 +165,10 @@ if (require.main === module) {
     paymentToken: args[4]
   };
   
-  updateFiles(addresses);
+  updateFiles(addresses)
+    .then(() => process.exit(0))
+    .catch((error) => {
+      console.error('Error updating files:', error);
+      process.exit(1);
+    });
 } 

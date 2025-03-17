@@ -1,49 +1,60 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 /**
  * @title SolarPanelRegistry
  * @dev Contract for registering and managing solar panel assets
+ * @notice This contract is upgradeable using the UUPS proxy pattern
  */
-contract SolarPanelRegistry is AccessControl, Pausable {
+contract SolarPanelRegistry is 
+    Initializable, 
+    AccessControlUpgradeable, 
+    PausableUpgradeable,
+    UUPSUpgradeable 
+{
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 public constant PANEL_OWNER_ROLE = keccak256("PANEL_OWNER_ROLE");
     bytes32 public constant FACTORY_ROLE = keccak256("FACTORY_ROLE");
+    bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+    bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
 
     struct Panel {
-        string serialNumber;
-        string manufacturer;
-        string name;
-        string location;
-        uint256 capacity; // in watts
-        address owner;
-        bool isActive;
-        uint256 registrationDate;
+        string externalId;       // Unique ID to link with off-chain metadata
+        address owner;           // Owner of the panel
+        bool isActive;           // Active status
+        uint256 registrationDate; // When the panel was registered
+        address shareTokenAddress; // Address of the associated share token
+        uint256 minimumCapacity;  // Minimum capacity required (for validation)
     }
 
     // Mapping from panel ID to Panel struct
     mapping(uint256 => Panel) public panels;
-    // Mapping from serial number to panel ID
-    mapping(string => uint256) public serialNumberToId;
+    // Mapping from external ID to panel ID
+    mapping(string => uint256) public externalIdToPanelId;
     // Mapping from owner address to array of panel IDs
     mapping(address => uint256[]) public ownerPanels;
+    // Mapping from share token address to panel ID
+    mapping(address => uint256) public tokenToPanelId;
     
     uint256 private _nextPanelId;
+    uint256 public minimumPanelCapacity; // Global minimum capacity requirement
 
     event PanelRegistered(
         uint256 indexed panelId,
-        string serialNumber,
-        string manufacturer,
-        string name,
-        string location,
-        uint256 capacity,
-        address owner
+        string externalId,
+        address owner,
+        address shareTokenAddress
     );
-    event PanelUpdated(uint256 indexed panelId, string name, string location, uint256 capacity);
     event PanelStatusChanged(uint256 indexed panelId, bool isActive);
+    event ShareTokenLinked(uint256 indexed panelId, address indexed tokenAddress);
+    event MinimumCapacityUpdated(uint256 newMinimumCapacity);
+    event EmergencyAction(string action, address indexed triggeredBy);
+    event ExternalDataUpdated(uint256 indexed panelId, string externalId);
 
     modifier onlyPanelOwnerOrAdmin(uint256 panelId) {
         require(
@@ -63,52 +74,93 @@ contract SolarPanelRegistry is AccessControl, Pausable {
         _;
     }
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
-        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _setupRole(ADMIN_ROLE, msg.sender);
-        _nextPanelId = 1;
+        _disableInitializers();
     }
 
     /**
-     * @dev Registers a new panel
-     * @param _serialNumber The serial number of the panel
-     * @param _manufacturer The manufacturer of the panel
-     * @param _name The name of the panel
-     * @param _location The location of the panel
-     * @param _capacity The capacity of the panel
+     * @dev Initializes the contract replacing the constructor for upgradeable contracts
+     */
+    function initialize(uint256 _minimumPanelCapacity) public initializer {
+        __AccessControl_init();
+        __Pausable_init();
+        __UUPSUpgradeable_init();
+        
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(ADMIN_ROLE, msg.sender);
+        _grantRole(UPGRADER_ROLE, msg.sender);
+        _grantRole(EMERGENCY_ROLE, msg.sender);
+        
+        _nextPanelId = 1;
+        minimumPanelCapacity = _minimumPanelCapacity;
+    }
+
+    /**
+     * @dev Required by the UUPSUpgradeable module
+     */
+    function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
+
+    /**
+     * @dev Sets the minimum capacity required for panel registration
+     * @param _minimumCapacity The new minimum capacity
+     */
+    function setMinimumPanelCapacity(uint256 _minimumCapacity) external onlyRole(ADMIN_ROLE) {
+        minimumPanelCapacity = _minimumCapacity;
+        emit MinimumCapacityUpdated(_minimumCapacity);
+    }
+
+    /**
+     * @dev Links a share token to a panel
+     * @param panelId The ID of the panel
+     * @param tokenAddress The address of the share token
+     */
+    function linkShareToken(uint256 panelId, address tokenAddress) 
+        external 
+        whenNotPaused 
+        onlyFactoryOrAdmin 
+    {
+        require(panels[panelId].owner != address(0), "Panel does not exist");
+        require(tokenAddress != address(0), "Invalid token address");
+        require(panels[panelId].shareTokenAddress == address(0), "Panel already has a token");
+        require(tokenToPanelId[tokenAddress] == 0, "Token already linked to a panel");
+        
+        panels[panelId].shareTokenAddress = tokenAddress;
+        tokenToPanelId[tokenAddress] = panelId;
+        
+        emit ShareTokenLinked(panelId, tokenAddress);
+    }
+
+    /**
+     * @dev Registers a new panel with minimal on-chain data
+     * @param _externalId The external ID linking to off-chain metadata
+     * @param _minimumCapacity The minimum capacity for this panel (for validation)
      * @param _owner The owner of the panel
      * @return panelId The ID of the registered panel
      */
     function registerPanelByFactory(
-        string memory _serialNumber,
-        string memory _manufacturer,
-        string memory _name,
-        string memory _location,
-        uint256 _capacity,
+        string memory _externalId,
+        uint256 _minimumCapacity,
         address _owner
     ) public whenNotPaused onlyFactoryOrAdmin returns (uint256) {
-        require(bytes(_serialNumber).length > 0, "Serial number cannot be empty");
-        require(bytes(_manufacturer).length > 0, "Manufacturer cannot be empty");
-        require(bytes(_name).length > 0, "Name cannot be empty");
-        require(bytes(_location).length > 0, "Location cannot be empty");
-        require(_capacity > 0, "Capacity must be greater than 0");
+        // Enhanced validation
+        require(bytes(_externalId).length > 0, "External ID cannot be empty");
+        require(_minimumCapacity >= minimumPanelCapacity, "Capacity below minimum requirement");
         require(_owner != address(0), "Owner cannot be zero address");
-        require(serialNumberToId[_serialNumber] == 0, "Panel with this serial number already registered");
+        require(externalIdToPanelId[_externalId] == 0, "Panel with this external ID already registered");
 
         uint256 panelId = _nextPanelId++;
 
         panels[panelId] = Panel({
-            serialNumber: _serialNumber,
-            manufacturer: _manufacturer,
-            name: _name,
-            location: _location,
-            capacity: _capacity,
+            externalId: _externalId,
             owner: _owner,
             isActive: true,
-            registrationDate: block.timestamp
+            registrationDate: block.timestamp,
+            shareTokenAddress: address(0),
+            minimumCapacity: _minimumCapacity
         });
 
-        serialNumberToId[_serialNumber] = panelId;
+        externalIdToPanelId[_externalId] = panelId;
         ownerPanels[_owner].push(panelId);
         
         if (!hasRole(PANEL_OWNER_ROLE, _owner)) {
@@ -117,41 +169,37 @@ contract SolarPanelRegistry is AccessControl, Pausable {
 
         emit PanelRegistered(
             panelId,
-            _serialNumber,
-            _manufacturer,
-            _name,
-            _location,
-            _capacity,
-            _owner
+            _externalId,
+            _owner,
+            address(0) // No token linked yet
         );
         
         return panelId;
     }
 
     /**
-     * @dev Updates panel metadata
+     * @dev Updates the external ID for a panel
      * @param panelId The ID of the panel
-     * @param _name The new name of the panel
-     * @param _location The new location of the panel
-     * @param _capacity The new capacity of the panel
+     * @param _newExternalId The new external ID
      */
-    function updatePanelMetadata(
+    function updateExternalId(
         uint256 panelId,
-        string memory _name,
-        string memory _location,
-        uint256 _capacity
+        string memory _newExternalId
     ) external whenNotPaused onlyPanelOwnerOrAdmin(panelId) {
         require(panels[panelId].owner != address(0), "Panel does not exist");
-        require(bytes(_name).length > 0, "Name cannot be empty");
-        require(bytes(_location).length > 0, "Location cannot be empty");
-        require(_capacity > 0, "Capacity must be greater than 0");
+        require(bytes(_newExternalId).length > 0, "External ID cannot be empty");
+        require(externalIdToPanelId[_newExternalId] == 0 || externalIdToPanelId[_newExternalId] == panelId, 
+                "External ID already in use");
+        
+        // Remove old mapping
+        string memory oldExternalId = panels[panelId].externalId;
+        delete externalIdToPanelId[oldExternalId];
+        
+        // Update to new external ID
+        panels[panelId].externalId = _newExternalId;
+        externalIdToPanelId[_newExternalId] = panelId;
 
-        Panel storage panel = panels[panelId];
-        panel.name = _name;
-        panel.location = _location;
-        panel.capacity = _capacity;
-
-        emit PanelUpdated(panelId, _name, _location, _capacity);
+        emit ExternalDataUpdated(panelId, _newExternalId);
     }
 
     /**
@@ -183,6 +231,47 @@ contract SolarPanelRegistry is AccessControl, Pausable {
     }
 
     /**
+     * @dev Gets the panel ID associated with a share token
+     * @param tokenAddress The address of the share token
+     * @return The panel ID
+     */
+    function getPanelIdByToken(address tokenAddress)
+        external
+        view
+        returns (uint256)
+    {
+        return tokenToPanelId[tokenAddress];
+    }
+
+    /**
+     * @dev Gets the panel ID associated with an external ID
+     * @param externalId The external ID
+     * @return The panel ID
+     */
+    function getPanelIdByExternalId(string memory externalId)
+        external
+        view
+        returns (uint256)
+    {
+        return externalIdToPanelId[externalId];
+    }
+
+    /**
+     * @dev Emergency function to force update a panel's status
+     * @param panelId The ID of the panel
+     * @param isActive The new active status
+     */
+    function emergencySetPanelStatus(uint256 panelId, bool isActive)
+        external
+        onlyRole(EMERGENCY_ROLE)
+    {
+        require(panels[panelId].owner != address(0), "Panel does not exist");
+        panels[panelId].isActive = isActive;
+        emit EmergencyAction("Set panel status", msg.sender);
+        emit PanelStatusChanged(panelId, isActive);
+    }
+
+    /**
      * @dev Pauses the contract
      */
     function pause() external onlyRole(ADMIN_ROLE) {
@@ -194,5 +283,13 @@ contract SolarPanelRegistry is AccessControl, Pausable {
      */
     function unpause() external onlyRole(ADMIN_ROLE) {
         _unpause();
+    }
+
+    /**
+     * @dev Emergency pause function
+     */
+    function emergencyPause() external onlyRole(EMERGENCY_ROLE) {
+        _pause();
+        emit EmergencyAction("Emergency pause", msg.sender);
     }
 } 

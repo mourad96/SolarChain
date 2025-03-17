@@ -3,6 +3,9 @@ import { ethers } from "hardhat";
 import type { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { MockERC20 } from "../typechain-types";
 
+// Import upgrades from hardhat
+const { upgrades } = require("hardhat");
+
 describe("MockERC20", function () {
   let token: MockERC20;
   let owner: SignerWithAddress;
@@ -16,8 +19,12 @@ describe("MockERC20", function () {
   beforeEach(async function () {
     [owner, user1, user2] = await ethers.getSigners();
 
-    const MockERC20 = await ethers.getContractFactory("MockERC20");
-    token = await MockERC20.deploy(name, symbol);
+    const MockERC20Factory = await ethers.getContractFactory("MockERC20");
+    token = await upgrades.deployProxy(
+      MockERC20Factory,
+      [name, symbol],
+      { initializer: "initialize", kind: "uups" }
+    );
     await token.waitForDeployment();
   });
 

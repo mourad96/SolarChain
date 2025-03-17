@@ -4,15 +4,22 @@ import { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { toast } from 'react-hot-toast';
 
 interface Project {
-  id: number;
+  id: string;
   name: string;
   location: string;
   capacity: string;
   minInvestment: string;
   expectedROI: string;
   progress: number;
+  owner?: string;
+  blockchainData?: {
+    tokenId: string;
+    totalSupply: string;
+    availableSupply: string;
+  } | null;
 }
 
 export default function ProjectsPage() {
@@ -21,49 +28,75 @@ export default function ProjectsPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // In a real app, fetch projects from an API
-    // For now, use mock data
-    const mockProjects = [
-      {
-        id: 1,
-        name: 'Solar Farm Alpha',
-        location: 'California, USA',
-        capacity: '500 kW',
-        minInvestment: '$1,000',
-        expectedROI: '15%',
-        progress: 75,
-      },
-      {
-        id: 2,
-        name: 'Green Energy Beta',
-        location: 'Texas, USA',
-        capacity: '300 kW',
-        minInvestment: '$500',
-        expectedROI: '12%',
-        progress: 45,
-      },
-      {
-        id: 3,
-        name: 'Sunshine Valley',
-        location: 'Arizona, USA',
-        capacity: '750 kW',
-        minInvestment: '$2,000',
-        expectedROI: '18%',
-        progress: 30,
-      },
-      {
-        id: 4,
-        name: 'Urban Rooftop Solar',
-        location: 'New York, USA',
-        capacity: '100 kW',
-        minInvestment: '$250',
-        expectedROI: '10%',
-        progress: 90,
-      },
-    ];
+    const fetchProjects = async () => {
+      try {
+        setIsLoading(true);
+        const token = localStorage.getItem('token');
+        if (!token) {
+          throw new Error('No authentication token found');
+        }
 
-    setProjects(mockProjects);
-    setIsLoading(false);
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/panels/projects/investors`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch projects');
+        }
+
+        const data = await response.json();
+        setProjects(data);
+      } catch (error) {
+        console.error('Error fetching projects:', error);
+        toast.error('Failed to load projects');
+        // Fallback to mock data if API fails
+        const mockProjects = [
+          {
+            id: '1',
+            name: 'Solar Farm Alpha',
+            location: 'California, USA',
+            capacity: '500 kW',
+            minInvestment: '$1,000',
+            expectedROI: '15%',
+            progress: 75,
+          },
+          {
+            id: '2',
+            name: 'Green Energy Beta',
+            location: 'Texas, USA',
+            capacity: '300 kW',
+            minInvestment: '$500',
+            expectedROI: '12%',
+            progress: 45,
+          },
+          {
+            id: '3',
+            name: 'Sunshine Valley',
+            location: 'Arizona, USA',
+            capacity: '750 kW',
+            minInvestment: '$2,000',
+            expectedROI: '18%',
+            progress: 30,
+          },
+          {
+            id: '4',
+            name: 'Urban Rooftop Solar',
+            location: 'New York, USA',
+            capacity: '100 kW',
+            minInvestment: '$250',
+            expectedROI: '10%',
+            progress: 90,
+          },
+        ];
+        setProjects(mockProjects);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchProjects();
   }, []);
 
   return (
@@ -108,6 +141,12 @@ export default function ProjectsPage() {
                       <p className="text-gray-500">Expected ROI</p>
                       <p className="font-medium text-green-600">{project.expectedROI}</p>
                     </div>
+                    {project.owner && (
+                      <div>
+                        <p className="text-gray-500">Owner</p>
+                        <p className="font-medium text-gray-900">{project.owner}</p>
+                      </div>
+                    )}
                   </div>
                   <div className="mt-4">
                     <div className="flex items-center justify-between text-sm">

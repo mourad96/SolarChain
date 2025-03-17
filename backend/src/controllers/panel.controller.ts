@@ -686,4 +686,89 @@ export class PanelController {
       return res.status(500).json({ error: 'Failed to create panels' });
     }
   }
+
+  public async getProjectsForInvestors(_req: Request, res: Response) {
+    try {
+      // Get all panels from the database that are active
+      const panels = await prismaClient.panel.findMany({
+        where: {
+          status: 'active',
+        },
+        select: {
+          id: true,
+          name: true,
+          location: true,
+          capacity: true,
+          status: true,
+          createdAt: true,
+          owner: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      });
+
+      // Get blockchain data for each panel if available
+      const projectsWithBlockchainData = await Promise.all(
+        panels.map(async (panel) => {
+          let blockchainData = null;
+          let progress = Math.floor(Math.random() * 100); // Default random progress for now
+          let minInvestment = '$1,000'; // Default min investment
+          let expectedROI = '12%'; // Default ROI
+
+          try {
+            // Get blockchain data using the BlockchainService
+            const onChainPanel = await blockchainService.getPanelById(panel.id);
+            if (onChainPanel) {
+              blockchainData = {
+                tokenId: onChainPanel.tokenId.toString(),
+                totalSupply: onChainPanel.totalSupply,
+                availableSupply: onChainPanel.availableSupply,
+              };
+              
+              // Calculate progress based on available supply vs total supply
+              const totalSupply = parseFloat(blockchainData.totalSupply);
+              const availableSupply = parseFloat(blockchainData.availableSupply);
+              if (totalSupply > 0) {
+                progress = Math.floor(((totalSupply - availableSupply) / totalSupply) * 100);
+              }
+              
+              // Calculate min investment based on token price
+              const tokenPrice = await blockchainService.getTokenPrice(panel.id);
+              if (tokenPrice) {
+                minInvestment = `$${(parseFloat(tokenPrice) * 10).toFixed(2)}`;
+              }
+              
+              // Get expected ROI from blockchain or calculate based on historical data
+              const estimatedROI = await blockchainService.getEstimatedROI(panel.id);
+              if (estimatedROI) {
+                expectedROI = `${estimatedROI}%`;
+              }
+            }
+          } catch (error) {
+            logger.error(`Failed to get blockchain data for panel ${panel.id}:`, error);
+          }
+
+          return {
+            id: panel.id,
+            name: panel.name,
+            location: panel.location,
+            capacity: `${panel.capacity} kW`,
+            owner: panel.owner.name,
+            minInvestment,
+            expectedROI,
+            progress,
+            blockchainData,
+            createdAt: panel.createdAt,
+          };
+        })
+      );
+
+      res.json(projectsWithBlockchainData);
+    } catch (error) {
+      logger.error('Error fetching projects for investors:', error);
+      res.status(500).json({ error: 'Failed to fetch projects' });
+    }
+  }
 } 

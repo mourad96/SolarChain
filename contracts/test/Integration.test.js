@@ -1,118 +1,158 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const { upgrades } = require("hardhat");
 
 describe("Solar Energy IoFy Integration Tests", function () {
   let registry;
   let factory;
-  let mockERC20;
   let shareToken;
+  let shareToken2;
   let dividendDistributor;
+  let mockERC20;
   let owner;
   let user1;
   let user2;
-  let user3;
-  
-  // Roles
-  let ADMIN_ROLE;
-  let FACTORY_ROLE;
-  let MINTER_ROLE;
-  let DISTRIBUTOR_ROLE;
-  let DEFAULT_ADMIN_ROLE;
-  let PANEL_OWNER_ROLE;
-  
-  // Panel IDs
   let panelId1;
   let panelId2;
+  let shareTokenAddress1;
+  let shareTokenAddress2;
+  
+  const ADMIN_ROLE = ethers.keccak256(ethers.toUtf8Bytes("ADMIN_ROLE"));
+  const FACTORY_ROLE = ethers.keccak256(ethers.toUtf8Bytes("FACTORY_ROLE"));
+  const DISTRIBUTOR_ROLE = ethers.keccak256(ethers.toUtf8Bytes("DISTRIBUTOR_ROLE"));
+  const DEFAULT_ADMIN_ROLE = ethers.ZeroHash;
+  const minimumPanelCapacity = ethers.parseEther("0.1");
+  const totalShares = ethers.parseEther("1000");
+  
+  // Roles
+  let MINTER_ROLE;
+  let PANEL_OWNER_ROLE;
+  let REGISTRAR_ROLE;
+  
+  // Parameters
+  let defaultSharesPerPanel;
 
   beforeEach(async function () {
     // Get signers
-    [owner, user1, user2, user3] = await ethers.getSigners();
+    [owner, user1, user2] = await ethers.getSigners();
     
     // Define roles
-    DEFAULT_ADMIN_ROLE = ethers.ZeroHash;
-    ADMIN_ROLE = ethers.keccak256(ethers.toUtf8Bytes("ADMIN_ROLE"));
-    FACTORY_ROLE = ethers.keccak256(ethers.toUtf8Bytes("FACTORY_ROLE"));
     MINTER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("MINTER_ROLE"));
-    DISTRIBUTOR_ROLE = ethers.keccak256(ethers.toUtf8Bytes("DISTRIBUTOR_ROLE"));
     PANEL_OWNER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("PANEL_OWNER_ROLE"));
+    REGISTRAR_ROLE = ethers.keccak256(ethers.toUtf8Bytes("REGISTRAR_ROLE"));
+    
+    // Set parameters
+    defaultSharesPerPanel = ethers.parseEther("1000");
 
-    // Deploy SolarPanelRegistry
-    const SolarPanelRegistry = await ethers.getContractFactory("SolarPanelRegistry");
-    registry = await SolarPanelRegistry.deploy();
+    // Deploy SolarPanelRegistry using upgrades.deployProxy
+    const SolarPanelRegistryFactory = await ethers.getContractFactory("SolarPanelRegistry");
+    registry = await upgrades.deployProxy(
+      SolarPanelRegistryFactory, 
+      [minimumPanelCapacity], 
+      { initializer: "initialize", kind: "uups" }
+    );
     await registry.waitForDeployment();
 
-    // Deploy SolarPanelFactory
-    const SolarPanelFactory = await ethers.getContractFactory("SolarPanelFactory");
-    factory = await SolarPanelFactory.deploy(await registry.getAddress());
+    // Deploy SolarPanelFactory using upgrades.deployProxy
+    const SolarPanelFactoryFactory = await ethers.getContractFactory("SolarPanelFactory");
+    factory = await upgrades.deployProxy(
+      SolarPanelFactoryFactory, 
+      [await registry.getAddress()], 
+      { initializer: "initialize", kind: "uups" }
+    );
     await factory.waitForDeployment();
 
     // Grant roles
-    // Registry roles - owner already has DEFAULT_ADMIN_ROLE and ADMIN_ROLE
     await registry.grantRole(FACTORY_ROLE, await factory.getAddress());
     await registry.grantRole(FACTORY_ROLE, owner.address);
     await registry.grantRole(DEFAULT_ADMIN_ROLE, await factory.getAddress());
+    await registry.grantRole(REGISTRAR_ROLE, owner.address);
+    await factory.grantRole(REGISTRAR_ROLE, owner.address);
     
-    // Deploy MockERC20
-    const MockERC20 = await ethers.getContractFactory("MockERC20");
-    mockERC20 = await MockERC20.deploy("USD Coin", "USDC");
+    // Deploy MockERC20 using upgrades.deployProxy
+    const MockERC20Factory = await ethers.getContractFactory("MockERC20");
+    mockERC20 = await upgrades.deployProxy(
+      MockERC20Factory,
+      ["USD Coin", "USDC"],
+      { initializer: "initialize", kind: "uups" }
+    );
     await mockERC20.waitForDeployment();
     
     // Mint some tokens to owner for testing
     await mockERC20.mint(owner.address, ethers.parseEther("10000"));
     
-    // Deploy ShareToken
-    const ShareToken = await ethers.getContractFactory("ShareToken");
-    shareToken = await ShareToken.deploy(await registry.getAddress());
-    await shareToken.waitForDeployment();
+    // Create panels with shares using factory
+    const tx1 = await factory.createPanelWithShares(
+      "SN001",
+      "Solar Panel Share 1",
+      "SPS1",
+      ethers.parseEther("1000")
+    );
+    const receipt1 = await tx1.wait();
+    const event1 = receipt1.logs.find(log => {
+      try {
+        const parsed = factory.interface.parseLog(log);
+        return parsed?.name === 'PanelAndSharesCreated';
+      } catch (e) {
+        return false;
+      }
+    });
+    if (!event1) {
+      throw new Error("PanelAndSharesCreated event not found");
+    }
+    const parsedLog1 = factory.interface.parseLog(event1);
+    panelId1 = parsedLog1.args[0]; // Use array index instead of named property
+    shareTokenAddress1 = parsedLog1.args[1]; // Use array index instead of named property
     
-    // Deploy DividendDistributor
-    const DividendDistributor = await ethers.getContractFactory("DividendDistributor");
-    dividendDistributor = await DividendDistributor.deploy(
-      await shareToken.getAddress(),
-      await registry.getAddress(),
-      await mockERC20.getAddress()
+    const tx2 = await factory.createPanelWithShares(
+      "SN002",
+      "Solar Panel Share 2",
+      "SPS2",
+      ethers.parseEther("1500")
+    );
+    const receipt2 = await tx2.wait();
+    const event2 = receipt2.logs.find(log => {
+      try {
+        const parsed = factory.interface.parseLog(log);
+        return parsed?.name === 'PanelAndSharesCreated';
+      } catch (e) {
+        return false;
+      }
+    });
+    if (!event2) {
+      throw new Error("PanelAndSharesCreated event not found");
+    }
+    const parsedLog2 = factory.interface.parseLog(event2);
+    panelId2 = parsedLog2.args[0]; // Use array index instead of named property
+    shareTokenAddress2 = parsedLog2.args[1]; // Use array index instead of named property
+    
+    // Get ShareToken instances
+    const ShareToken = await ethers.getContractFactory("ShareToken");
+    shareToken = ShareToken.attach(shareTokenAddress1);
+    shareToken2 = ShareToken.attach(shareTokenAddress2);
+    
+    // Deploy DividendDistributor using upgrades.deployProxy
+    const DividendDistributorFactory = await ethers.getContractFactory("DividendDistributor");
+    dividendDistributor = await upgrades.deployProxy(
+      DividendDistributorFactory,
+      [
+        shareTokenAddress1,
+        await registry.getAddress(),
+        await mockERC20.getAddress()
+      ],
+      { initializer: "initialize", kind: "uups" }
     );
     await dividendDistributor.waitForDeployment();
-    
-    // Grant roles
-    // Registry roles - owner already has DEFAULT_ADMIN_ROLE and ADMIN_ROLE
-    await registry.grantRole(FACTORY_ROLE, await factory.getAddress());
-    await registry.grantRole(FACTORY_ROLE, owner.address);
-    
-    // ShareToken roles - owner already has DEFAULT_ADMIN_ROLE
-    await shareToken.grantRole(MINTER_ROLE, owner.address);
-    
-    // DividendDistributor roles - owner already has DEFAULT_ADMIN_ROLE
+
+    // Grant DISTRIBUTOR_ROLE to owner and DividendDistributor
+    await registry.grantRole(DISTRIBUTOR_ROLE, owner.address);
+    await registry.grantRole(DISTRIBUTOR_ROLE, await dividendDistributor.getAddress());
     await dividendDistributor.grantRole(DISTRIBUTOR_ROLE, owner.address);
+    await dividendDistributor.grantRole(ADMIN_ROLE, owner.address);
     
-    // Register panels using factory
-    const serialNumbers = ["SN001", "SN002"];
-    const manufacturers = ["SolarCorp", "SunPower"];
-    const names = ["Rooftop Panel 1", "Rooftop Panel 2"];
-    const locations = ["New York", "Los Angeles"];
-    const capacities = [5000, 6000]; // 5kW and 6kW
-    
-    // First, register a panel directly through the registry to get panelId1
-    await registry.registerPanelByFactory(
-      serialNumbers[0],
-      manufacturers[0],
-      names[0],
-      locations[0],
-      capacities[0],
-      owner.address
-    );
-    panelId1 = await registry.serialNumberToId(serialNumbers[0]);
-    
-    // Then register the second panel
-    await registry.registerPanelByFactory(
-      serialNumbers[1],
-      manufacturers[1],
-      names[1],
-      locations[1],
-      capacities[1],
-      owner.address
-    );
-    panelId2 = await registry.serialNumberToId(serialNumbers[1]);
+    // Grant MINTER_ROLE to owner
+    await shareToken.grantRole(MINTER_ROLE, owner.address);
+    await shareToken2.grantRole(MINTER_ROLE, owner.address);
   });
 
   describe("End-to-End Flow", function () {
@@ -121,44 +161,33 @@ describe("Solar Energy IoFy Integration Tests", function () {
       const panel1 = await registry.panels(panelId1);
       const panel2 = await registry.panels(panelId2);
       
-      expect(panel1.serialNumber).to.equal("SN001");
-      expect(panel2.serialNumber).to.equal("SN002");
-      expect(panel1.manufacturer).to.equal("SolarCorp");
-      expect(panel2.manufacturer).to.equal("SunPower");
-      expect(panel1.capacity).to.equal(5000);
-      expect(panel2.capacity).to.equal(6000);
+      expect(panel1.externalId).to.equal("SN001");
+      expect(panel2.externalId).to.equal("SN002");
+      expect(panel1.isActive).to.be.true;
+      expect(panel2.isActive).to.be.true;
       expect(panel1.owner).to.equal(owner.address);
       expect(panel2.owner).to.equal(owner.address);
       
-      // 2. Mint shares for the panels
-      const shares1 = ethers.parseEther("1000"); // 1000 shares for panel 1
-      const shares2 = ethers.parseEther("1500"); // 1500 shares for panel 2
+      // 2. Verify shares were minted correctly
+      const [totalSupply1, isActive1] = await shareToken.getTokenDetails();
+      const [totalSupply2, isActive2] = await shareToken2.getTokenDetails();
       
-      await shareToken.mintShares(panelId1, shares1);
-      await shareToken.mintShares(panelId2, shares2);
-      
-      // Verify shares were minted
-      const [totalShares1, isMinted1] = await shareToken.getPanelTokenDetails(panelId1);
-      const [totalShares2, isMinted2] = await shareToken.getPanelTokenDetails(panelId2);
-      
-      expect(totalShares1).to.equal(shares1);
-      expect(totalShares2).to.equal(shares2);
-      expect(isMinted1).to.be.true;
-      expect(isMinted2).to.be.true;
+      expect(totalSupply1).to.equal(ethers.parseEther("1000"));
+      expect(totalSupply2).to.equal(ethers.parseEther("1500"));
+      expect(isActive1).to.be.true;
+      expect(isActive2).to.be.true;
       
       // 3. Transfer some shares to users
-      await shareToken.transferPanelShares(panelId1, user1.address, ethers.parseEther("300"));
-      await shareToken.transferPanelShares(panelId1, user2.address, ethers.parseEther("200"));
-      await shareToken.transferPanelShares(panelId2, user2.address, ethers.parseEther("400"));
-      await shareToken.transferPanelShares(panelId2, user3.address, ethers.parseEther("300"));
+      await shareToken.transfer(user1.address, ethers.parseEther("300"));
+      await shareToken.transfer(user2.address, ethers.parseEther("200"));
+      await shareToken2.transfer(user2.address, ethers.parseEther("400"));
       
       // Verify share transfers
-      expect(await shareToken.getPanelBalance(panelId1, owner.address)).to.equal(ethers.parseEther("500"));
-      expect(await shareToken.getPanelBalance(panelId1, user1.address)).to.equal(ethers.parseEther("300"));
-      expect(await shareToken.getPanelBalance(panelId1, user2.address)).to.equal(ethers.parseEther("200"));
-      expect(await shareToken.getPanelBalance(panelId2, owner.address)).to.equal(ethers.parseEther("800"));
-      expect(await shareToken.getPanelBalance(panelId2, user2.address)).to.equal(ethers.parseEther("400"));
-      expect(await shareToken.getPanelBalance(panelId2, user3.address)).to.equal(ethers.parseEther("300"));
+      expect(await shareToken.balanceOf(owner.address)).to.equal(ethers.parseEther("500"));
+      expect(await shareToken.balanceOf(user1.address)).to.equal(ethers.parseEther("300"));
+      expect(await shareToken.balanceOf(user2.address)).to.equal(ethers.parseEther("200"));
+      expect(await shareToken2.balanceOf(owner.address)).to.equal(ethers.parseEther("1100"));
+      expect(await shareToken2.balanceOf(user2.address)).to.equal(ethers.parseEther("400"));
       
       // 4. Distribute dividends
       const dividend1 = ethers.parseEther("100"); // 100 USDC for panel 1
@@ -176,39 +205,35 @@ describe("Solar Energy IoFy Integration Tests", function () {
       const user1Shares = ethers.parseEther("300");
       const user2Shares1 = ethers.parseEther("200");
       const user2Shares2 = ethers.parseEther("400");
-      const user3Shares = ethers.parseEther("300");
       
-      const user1ExpectedDividend = (BigInt(dividend1) * BigInt(user1Shares)) / BigInt(shares1);
-      const user2ExpectedDividend1 = (BigInt(dividend1) * BigInt(user2Shares1)) / BigInt(shares1);
-      const user2ExpectedDividend2 = (BigInt(dividend2) * BigInt(user2Shares2)) / BigInt(shares2);
+      const totalShares1BigInt = ethers.parseEther("1000");
+      const totalShares2BigInt = ethers.parseEther("1500");
+      
+      const user1ExpectedDividend = (BigInt(dividend1) * BigInt(user1Shares)) / totalShares1BigInt;
+      const user2ExpectedDividend1 = (BigInt(dividend1) * BigInt(user2Shares1)) / totalShares1BigInt;
+      const user2ExpectedDividend2 = (BigInt(dividend2) * BigInt(user2Shares2)) / totalShares2BigInt;
       const user2TotalExpectedDividend = user2ExpectedDividend1 + user2ExpectedDividend2;
-      const user3ExpectedDividend = (BigInt(dividend2) * BigInt(user3Shares)) / BigInt(shares2);
       
       // Get initial balances
       const user1InitialBalance = await mockERC20.balanceOf(user1.address);
       const user2InitialBalance = await mockERC20.balanceOf(user2.address);
-      const user3InitialBalance = await mockERC20.balanceOf(user3.address);
       
       // Claim dividends
       await dividendDistributor.connect(user1).claimDividends(panelId1);
       await dividendDistributor.connect(user2).claimDividends(panelId1);
       await dividendDistributor.connect(user2).claimDividends(panelId2);
-      await dividendDistributor.connect(user3).claimDividends(panelId2);
       
       // Verify dividend claims
       const user1FinalBalance = await mockERC20.balanceOf(user1.address);
       const user2FinalBalance = await mockERC20.balanceOf(user2.address);
-      const user3FinalBalance = await mockERC20.balanceOf(user3.address);
       
       expect(BigInt(user1FinalBalance) - BigInt(user1InitialBalance)).to.equal(user1ExpectedDividend);
       expect(BigInt(user2FinalBalance) - BigInt(user2InitialBalance)).to.equal(user2TotalExpectedDividend);
-      expect(BigInt(user3FinalBalance) - BigInt(user3InitialBalance)).to.equal(user3ExpectedDividend);
       
       // 6. Verify unclaimed dividends are now 0
       expect(await dividendDistributor.getUnclaimedDividends(panelId1, user1.address)).to.equal(0);
       expect(await dividendDistributor.getUnclaimedDividends(panelId1, user2.address)).to.equal(0);
       expect(await dividendDistributor.getUnclaimedDividends(panelId2, user2.address)).to.equal(0);
-      expect(await dividendDistributor.getUnclaimedDividends(panelId2, user3.address)).to.equal(0);
     });
   });
   
@@ -222,17 +247,16 @@ describe("Solar Energy IoFy Integration Tests", function () {
       
       // Try operations while paused
       await expect(
-        factory.registerPanelsBatch(
-          ["SN003"],
-          ["SolarCorp"],
-          ["Panel 3"],
-          ["Location 3"],
-          [5000]
+        factory.createPanelWithShares(
+          "SN003",
+          "Solar Panel Share 3",
+          "SPS3",
+          ethers.parseEther("1000")
         )
       ).to.be.revertedWith("Pausable: paused");
       
       await expect(
-        shareToken.mintShares(panelId1, ethers.parseEther("100"))
+        shareToken.mintShares(ethers.parseEther("100"), owner.address)
       ).to.be.revertedWith("Pausable: paused");
       
       await expect(
@@ -246,56 +270,105 @@ describe("Solar Energy IoFy Integration Tests", function () {
       await dividendDistributor.unpause();
       
       // Verify operations work after unpausing
-      await registry.registerPanelByFactory(
+      const tx3 = await factory.createPanelWithShares(
         "SN003",
-        "SolarCorp",
-        "Panel 3",
-        "Location 3",
-        5000,
-        owner.address
+        "Solar Panel Share 3",
+        "SPS3",
+        ethers.parseEther("1000")
       );
+      const receipt3 = await tx3.wait();
+      const event3 = receipt3.logs.find(log => {
+        try {
+          const parsed = factory.interface.parseLog(log);
+          return parsed?.name === 'PanelAndSharesCreated';
+        } catch (e) {
+          return false;
+        }
+      });
+      if (!event3) {
+        throw new Error("PanelAndSharesCreated event not found");
+      }
+      const parsedLog3 = factory.interface.parseLog(event3);
+      const panelId3 = parsedLog3.args[0]; // Use array index instead of named property
       
       // Verify the panel was registered
-      const panelId3 = await registry.serialNumberToId("SN003");
       const panel3 = await registry.panels(panelId3);
-      expect(panel3.serialNumber).to.equal("SN003");
+      expect(panel3.externalId).to.equal("SN003");
     });
   });
   
   describe("Access Control", function () {
     it("Should enforce proper access control across the system", async function () {
-      // Try to mint shares without MINTER_ROLE
+      // Create a new panel with shares for testing
+      const tx3 = await factory.createPanelWithShares(
+        "SN003",
+        "Solar Panel Share 3",
+        "SPS3",
+        ethers.parseEther("1000")
+      );
+      const receipt3 = await tx3.wait();
+      const event3 = receipt3.logs.find(log => {
+        try {
+          const parsed = factory.interface.parseLog(log);
+          return parsed?.name === 'PanelAndSharesCreated';
+        } catch (e) {
+          return false;
+        }
+      });
+      if (!event3) {
+        throw new Error("PanelAndSharesCreated event not found");
+      }
+      const parsedLog3 = factory.interface.parseLog(event3);
+      const panelId3 = parsedLog3.args[0];
+      const shareTokenAddress3 = parsedLog3.args[1];
+
+      // Get the new ShareToken instance
+      const ShareToken = await ethers.getContractFactory("ShareToken");
+      const shareToken3 = ShareToken.attach(shareTokenAddress3);
+
+      // Try to create a panel without REGISTRAR_ROLE
       await expect(
-        shareToken.connect(user1).mintShares(panelId1, ethers.parseEther("100"))
-      ).to.be.revertedWith("AccessControl: account " + user1.address.toLowerCase() + " is missing role " + MINTER_ROLE);
+        factory.connect(user1).createPanelWithShares(
+          "SN004",
+          "Solar Panel Share 4",
+          "SPS4",
+          ethers.parseEther("1000")
+        )
+      ).to.be.revertedWith(`AccessControl: account ${user1.address.toLowerCase()} is missing role ${REGISTRAR_ROLE}`);
       
       // Try to distribute dividends without DISTRIBUTOR_ROLE
       await expect(
-        dividendDistributor.connect(user1).distributeDividends(panelId1, ethers.parseEther("10"))
-      ).to.be.revertedWith("AccessControl: account " + user1.address.toLowerCase() + " is missing role " + DISTRIBUTOR_ROLE);
+        dividendDistributor.connect(user1).distributeDividends(panelId3, ethers.parseEther("10"))
+      ).to.be.revertedWith(`AccessControl: account ${user1.address.toLowerCase()} is missing role ${DISTRIBUTOR_ROLE}`);
       
       // Try to pause contracts without ADMIN_ROLE
       await expect(
         registry.connect(user1).pause()
-      ).to.be.revertedWith("AccessControl: account " + user1.address.toLowerCase() + " is missing role " + ADMIN_ROLE);
+      ).to.be.revertedWith(`AccessControl: account ${user1.address.toLowerCase()} is missing role ${ADMIN_ROLE}`);
       
       // Grant roles to user1
-      await shareToken.grantRole(MINTER_ROLE, user1.address);
+      await factory.grantRole(REGISTRAR_ROLE, user1.address);
       await dividendDistributor.grantRole(DISTRIBUTOR_ROLE, user1.address);
       await registry.grantRole(ADMIN_ROLE, user1.address);
       
       // Verify operations work after granting roles
-      await shareToken.connect(user1).mintShares(panelId1, ethers.parseEther("100"));
+      const tx4 = await factory.connect(user1).createPanelWithShares(
+        "SN004",
+        "Solar Panel Share 4",
+        "SPS4",
+        ethers.parseEther("1000")
+      );
+      await tx4.wait();
       
       // Approve tokens for dividend distribution
       await mockERC20.transfer(user1.address, ethers.parseEther("10"));
       await mockERC20.connect(user1).approve(await dividendDistributor.getAddress(), ethers.parseEther("10"));
       
-      await dividendDistributor.connect(user1).distributeDividends(panelId1, ethers.parseEther("10"));
+      await dividendDistributor.connect(user1).distributeDividends(panelId3, ethers.parseEther("10"));
       await registry.connect(user1).pause();
       
       // Revoke roles from user1
-      await shareToken.revokeRole(MINTER_ROLE, user1.address);
+      await factory.revokeRole(REGISTRAR_ROLE, user1.address);
       await dividendDistributor.revokeRole(DISTRIBUTOR_ROLE, user1.address);
       await registry.revokeRole(ADMIN_ROLE, user1.address);
       
@@ -304,8 +377,13 @@ describe("Solar Energy IoFy Integration Tests", function () {
       
       // Verify operations fail after revoking roles
       await expect(
-        shareToken.connect(user1).mintShares(panelId1, ethers.parseEther("100"))
-      ).to.be.revertedWith("AccessControl: account " + user1.address.toLowerCase() + " is missing role " + MINTER_ROLE);
+        factory.connect(user1).createPanelWithShares(
+          "SN005",
+          "Solar Panel Share 5",
+          "SPS5",
+          ethers.parseEther("1000")
+        )
+      ).to.be.revertedWith(`AccessControl: account ${user1.address.toLowerCase()} is missing role ${REGISTRAR_ROLE}`);
     });
   });
 }); 

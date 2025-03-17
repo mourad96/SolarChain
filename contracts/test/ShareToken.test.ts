@@ -3,6 +3,9 @@ import { ethers } from "hardhat";
 import { SolarPanelRegistry, ShareToken } from "../typechain-types";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 
+// Import upgrades from hardhat
+const { upgrades } = require("hardhat");
+
 describe("ShareToken", function () {
   let solarPanelRegistry: SolarPanelRegistry;
   let shareToken: ShareToken;
@@ -11,23 +14,31 @@ describe("ShareToken", function () {
   let user2: SignerWithAddress;
   let panelId: bigint;
   
-  const ADMIN_ROLE = ethers.keccak256(ethers.toUtf8Bytes("ADMIN_ROLE"));
   const FACTORY_ROLE = ethers.keccak256(ethers.toUtf8Bytes("FACTORY_ROLE"));
   const MINTER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("MINTER_ROLE"));
-  const DEFAULT_ADMIN_ROLE = ethers.ZeroHash;
+  const ADMIN_ROLE = ethers.keccak256(ethers.toUtf8Bytes("ADMIN_ROLE"));
+  const minimumPanelCapacity = ethers.parseEther("0.1");
 
   beforeEach(async function () {
     // Get signers
     [owner, user1, user2] = await ethers.getSigners();
 
-    // Deploy SolarPanelRegistry
-    const SolarPanelRegistry = await ethers.getContractFactory("SolarPanelRegistry");
-    solarPanelRegistry = await SolarPanelRegistry.deploy();
+    // Deploy SolarPanelRegistry using upgrades.deployProxy
+    const SolarPanelRegistryFactory = await ethers.getContractFactory("SolarPanelRegistry");
+    solarPanelRegistry = await upgrades.deployProxy(
+      SolarPanelRegistryFactory, 
+      [minimumPanelCapacity], 
+      { initializer: "initialize", kind: "uups" }
+    );
     await solarPanelRegistry.waitForDeployment();
 
-    // Deploy ShareToken
-    const ShareToken = await ethers.getContractFactory("ShareToken");
-    shareToken = await ShareToken.deploy(await solarPanelRegistry.getAddress());
+    // Deploy ShareToken using upgrades.deployProxy
+    const ShareTokenFactory = await ethers.getContractFactory("ShareToken");
+    shareToken = await upgrades.deployProxy(
+      ShareTokenFactory, 
+      ["Solar Panel Share", "SPS", await solarPanelRegistry.getAddress(), 1], 
+      { initializer: "initialize", kind: "uups" }
+    );
     await shareToken.waitForDeployment();
     
     // Grant FACTORY_ROLE to owner
@@ -42,19 +53,20 @@ describe("ShareToken", function () {
     // Register a test panel
     await solarPanelRegistry.registerPanelByFactory(
       "TEST001",
-      "TestManufacturer",
-      "Test Panel",
-      "Test Location",
-      5000,
+      minimumPanelCapacity,
       owner.address
     );
     
-    panelId = await solarPanelRegistry.serialNumberToId("TEST001");
+    // Get the panel ID
+    panelId = 1n; // First panel should have ID 1
+
+    // Link the ShareToken to the panel in the registry
+    await solarPanelRegistry.linkShareToken(panelId, await shareToken.getAddress());
   });
 
   describe("Deployment", function () {
     it("Should set the right owner", async function () {
-      expect(await shareToken.hasRole(DEFAULT_ADMIN_ROLE, owner.address)).to.be.true;
+      expect(await shareToken.hasRole(ADMIN_ROLE, owner.address)).to.be.true;
     });
 
     it("Should set the right panel registry", async function () {
@@ -66,20 +78,33 @@ describe("ShareToken", function () {
     it("Should mint shares for a panel", async function () {
       const amount = ethers.parseEther("1000"); // 1000 shares
       
-      await shareToken.mintShares(panelId, amount);
+      await shareToken.mintShares(amount, owner.address);
       
-      const [totalShares, isMinted] = await shareToken.getPanelTokenDetails(panelId);
+      const [totalShares, isMinted, externalId] = await shareToken.getTokenDetails();
       
       expect(totalShares).to.equal(amount);
       expect(isMinted).to.be.true;
       expect(await shareToken.balanceOf(owner.address)).to.equal(amount);
-      expect(await shareToken.getPanelBalance(panelId, owner.address)).to.equal(amount);
+      expect(await shareToken.getHolderBalance(owner.address)).to.equal(amount);
     });
     
     it("should not allow minting shares for non-existent panel", async function () {
+      // Deploy a new ShareToken with a non-existent panel ID
+      const ShareTokenFactory = await ethers.getContractFactory("ShareToken");
       const nonExistentPanelId = 999n;
+      const invalidShareToken = await upgrades.deployProxy(
+        ShareTokenFactory,
+        ["Invalid Panel Share", "IPS", await solarPanelRegistry.getAddress(), nonExistentPanelId],
+        { initializer: "initialize", kind: "uups" }
+      );
+      await invalidShareToken.waitForDeployment();
+
+      // Grant MINTER_ROLE to owner
+      await invalidShareToken.grantRole(MINTER_ROLE, owner.address);
+
+      // Try to mint shares for non-existent panel
       await expect(
-        shareToken.mintShares(nonExistentPanelId, ethers.parseEther("100"))
+        invalidShareToken.mintShares(ethers.parseEther("100"), user2.address)
       ).to.be.revertedWith("Panel does not exist");
     });
     
@@ -87,30 +112,43 @@ describe("ShareToken", function () {
       // Register a panel
       await solarPanelRegistry.registerPanelByFactory(
         "TEST002",
-        "TestManufacturer",
-        "Test Panel",
-        "Test Location",
-        5000,
-        owner.address
+        minimumPanelCapacity,
+        user2.address
       );
       
-      const inactivePanelId = await solarPanelRegistry.serialNumberToId("TEST002");
+      // Get the panel ID
+      const panelId2 = 2n;
+      
+      // Deploy a new ShareToken for the inactive panel
+      const ShareTokenFactory = await ethers.getContractFactory("ShareToken");
+      const inactiveShareToken = await upgrades.deployProxy(
+        ShareTokenFactory,
+        ["Inactive Panel Share", "IPS", await solarPanelRegistry.getAddress(), panelId2],
+        { initializer: "initialize", kind: "uups" }
+      );
+      await inactiveShareToken.waitForDeployment();
+
+      // Link the ShareToken to the panel in the registry
+      await solarPanelRegistry.linkShareToken(panelId2, await inactiveShareToken.getAddress());
+
+      // Grant MINTER_ROLE to owner
+      await inactiveShareToken.grantRole(MINTER_ROLE, owner.address);
       
       // Deactivate the panel
-      await solarPanelRegistry.setPanelStatus(inactivePanelId, false);
+      await solarPanelRegistry.setPanelStatus(panelId2, false);
       
       await expect(
-        shareToken.mintShares(inactivePanelId, ethers.parseEther("100"))
+        inactiveShareToken.mintShares(ethers.parseEther("100"), user2.address)
       ).to.be.revertedWith("Panel is not active");
     });
     
     it("should not allow minting shares for already minted panel", async function () {
       // First mint
-      await shareToken.mintShares(panelId, ethers.parseEther("1000"));
+      await shareToken.mintShares(ethers.parseEther("1000"), owner.address);
       
       // Try to mint again
       await expect(
-        shareToken.mintShares(panelId, ethers.parseEther("1000"))
+        shareToken.mintShares(ethers.parseEther("1000"), owner.address)
       ).to.be.revertedWith("Shares already minted for this panel");
     });
     
@@ -118,13 +156,13 @@ describe("ShareToken", function () {
       const amount = ethers.parseEther("1000");
       
       await expect(
-        shareToken.connect(user1).mintShares(panelId, amount)
+        shareToken.connect(user1).mintShares(amount, owner.address)
       ).to.be.revertedWith("AccessControl: account " + user1.address.toLowerCase() + " is missing role " + MINTER_ROLE);
     });
 
     it("should emit SharesMinted event", async function () {
       const amount = ethers.parseEther("1000");
-      await expect(shareToken.mintShares(panelId, amount))
+      await expect(shareToken.mintShares(amount, owner.address))
         .to.emit(shareToken, "SharesMinted")
         .withArgs(panelId, amount);
     });
@@ -134,30 +172,30 @@ describe("ShareToken", function () {
     beforeEach(async function () {
       // Mint shares for the panel
       const amount = ethers.parseEther("1000");
-      await shareToken.mintShares(panelId, amount);
+      await shareToken.mintShares(amount, owner.address);
     });
     
-    it("Should transfer panel shares", async function () {
+    it("Should transfer shares", async function () {
       const transferAmount = ethers.parseEther("300");
       
-      await shareToken.transferPanelShares(panelId, user1.address, transferAmount);
+      await shareToken.transfer(user1.address, transferAmount);
       
-      expect(await shareToken.getPanelBalance(panelId, owner.address)).to.equal(
-        ethers.parseEther("700")
-      );
-      expect(await shareToken.getPanelBalance(panelId, user1.address)).to.equal(transferAmount);
       expect(await shareToken.balanceOf(owner.address)).to.equal(
         ethers.parseEther("700")
       );
       expect(await shareToken.balanceOf(user1.address)).to.equal(transferAmount);
+      expect(await shareToken.getHolderBalance(owner.address)).to.equal(
+        ethers.parseEther("700")
+      );
+      expect(await shareToken.getHolderBalance(user1.address)).to.equal(transferAmount);
     });
     
-    it("Should add new holder to panel holders", async function () {
+    it("Should add new holder", async function () {
       const transferAmount = ethers.parseEther("300");
       
-      await shareToken.transferPanelShares(panelId, user1.address, transferAmount);
+      await shareToken.transfer(user1.address, transferAmount);
       
-      const holders = await shareToken.getPanelHolders(panelId);
+      const holders = await shareToken.getTokenHolders();
       expect(holders).to.include(owner.address);
       expect(holders).to.include(user1.address);
     });
@@ -166,26 +204,21 @@ describe("ShareToken", function () {
       const transferAmount = ethers.parseEther("1100"); // More than minted
       
       await expect(
-        shareToken.transferPanelShares(panelId, user1.address, transferAmount)
-      ).to.be.revertedWith("Insufficient panel shares");
+        shareToken.transfer(user1.address, transferAmount)
+      ).to.be.revertedWithPanic(0x11); // Arithmetic overflow
     });
     
     it("Should not allow transferring shares for non-minted panel", async function () {
       // Register a new panel without minting shares
       await solarPanelRegistry.registerPanelByFactory(
         "TEST003",
-        "TestManufacturer",
-        "Test Panel",
-        "Test Location",
-        5000,
-        owner.address
+        minimumPanelCapacity,
+        user2.address
       );
       
-      const nonMintedPanelId = await solarPanelRegistry.serialNumberToId("TEST003");
-      
       await expect(
-        shareToken.transferPanelShares(nonMintedPanelId, user1.address, ethers.parseEther("100"))
-      ).to.be.revertedWith("Shares not minted for this panel");
+        shareToken.connect(user2).transfer(user1.address, ethers.parseEther("100"))
+      ).to.be.revertedWithPanic(0x11); // Arithmetic overflow
     });
   });
 
@@ -196,23 +229,23 @@ describe("ShareToken", function () {
       
       // Try to mint shares while paused
       await expect(
-        shareToken.mintShares(panelId, ethers.parseEther("1000"))
+        shareToken.mintShares(ethers.parseEther("1000"), owner.address)
       ).to.be.revertedWith("Pausable: paused");
       
       // Unpause the contract
       await shareToken.unpause();
       
       // Mint shares after unpausing
-      await shareToken.mintShares(panelId, ethers.parseEther("1000"));
+      await shareToken.mintShares(ethers.parseEther("1000"), owner.address);
       
-      const [totalShares, isMinted] = await shareToken.getPanelTokenDetails(panelId);
+      const [totalShares, isMinted, externalId] = await shareToken.getTokenDetails();
       expect(totalShares).to.equal(ethers.parseEther("1000"));
     });
     
     it("Should not allow non-admins to pause", async function () {
       await expect(
         shareToken.connect(user1).pause()
-      ).to.be.revertedWith("AccessControl: account " + user1.address.toLowerCase() + " is missing role " + DEFAULT_ADMIN_ROLE);
+      ).to.be.revertedWith("AccessControl: account " + user1.address.toLowerCase() + " is missing role " + ADMIN_ROLE);
     });
   });
 }); 

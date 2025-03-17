@@ -3,11 +3,14 @@ import { ethers } from "hardhat";
 import { SolarPanelRegistry, ShareToken, DividendDistributor, MockERC20 } from "../typechain-types";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 
+// Import upgrades from hardhat
+const { upgrades } = require("hardhat");
+
 describe("DividendDistributor", function () {
   let solarPanelRegistry: SolarPanelRegistry;
   let shareToken: ShareToken;
   let dividendDistributor: DividendDistributor;
-  let mockERC20: MockERC20;
+  let mockToken: MockERC20;
   let owner: SignerWithAddress;
   let user1: SignerWithAddress;
   let user2: SignerWithAddress;
@@ -17,6 +20,7 @@ describe("DividendDistributor", function () {
   const FACTORY_ROLE = ethers.keccak256(ethers.toUtf8Bytes("FACTORY_ROLE"));
   const MINTER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("MINTER_ROLE"));
   const DISTRIBUTOR_ROLE = ethers.keccak256(ethers.toUtf8Bytes("DISTRIBUTOR_ROLE"));
+  const REGISTRAR_ROLE = ethers.keccak256(ethers.toUtf8Bytes("REGISTRAR_ROLE"));
   const DEFAULT_ADMIN_ROLE = ethers.ZeroHash;
   
   const totalShares = ethers.parseEther("1000");
@@ -25,32 +29,88 @@ describe("DividendDistributor", function () {
   const ownerShares = totalShares - user1Shares - user2Shares;
   
   const dividendAmount = ethers.parseEther("100");
+  const minimumPanelCapacity = ethers.parseEther("0.1");
 
   beforeEach(async function () {
     // Get signers
     [owner, user1, user2] = await ethers.getSigners();
 
-    // Deploy SolarPanelRegistry
-    const SolarPanelRegistry = await ethers.getContractFactory("SolarPanelRegistry");
-    solarPanelRegistry = await SolarPanelRegistry.deploy();
+    // Deploy SolarPanelRegistry using upgrades.deployProxy
+    const SolarPanelRegistryFactory = await ethers.getContractFactory("SolarPanelRegistry");
+    solarPanelRegistry = await upgrades.deployProxy(
+      SolarPanelRegistryFactory, 
+      [minimumPanelCapacity], 
+      { initializer: "initialize", kind: "uups" }
+    );
     await solarPanelRegistry.waitForDeployment();
 
-    // Deploy ShareToken
-    const ShareToken = await ethers.getContractFactory("ShareToken");
-    shareToken = await ShareToken.deploy(await solarPanelRegistry.getAddress());
-    await shareToken.waitForDeployment();
+    // Deploy SolarPanelFactory using upgrades.deployProxy
+    const SolarPanelFactoryFactory = await ethers.getContractFactory("SolarPanelFactory");
+    const factory = await upgrades.deployProxy(
+      SolarPanelFactoryFactory,
+      [await solarPanelRegistry.getAddress()],
+      { initializer: "initialize", kind: "uups" }
+    );
+    await factory.waitForDeployment();
+
+    // Grant roles
+    await solarPanelRegistry.grantRole(FACTORY_ROLE, await factory.getAddress());
+    await solarPanelRegistry.grantRole(DEFAULT_ADMIN_ROLE, await factory.getAddress());
+    await factory.grantRole(REGISTRAR_ROLE, owner.address);
     
-    // Deploy MockERC20
-    const MockERC20 = await ethers.getContractFactory("MockERC20");
-    mockERC20 = await MockERC20.deploy("Mock Token", "MTK");
-    await mockERC20.waitForDeployment();
+    // Create panel with shares
+    const tx = await factory.createPanelWithShares(
+      "SN001",
+      "Solar Panel Share 1",
+      "SPS1",
+      totalShares
+    );
+    const receipt = await tx.wait();
+    const event = receipt.logs.find((log: any) => {
+      try {
+        const parsed = factory.interface.parseLog(log);
+        return parsed?.name === 'PanelAndSharesCreated';
+      } catch (e) {
+        return false;
+      }
+    });
     
-    // Deploy DividendDistributor
-    const DividendDistributor = await ethers.getContractFactory("DividendDistributor");
-    dividendDistributor = await DividendDistributor.deploy(
-      await shareToken.getAddress(),
-      await solarPanelRegistry.getAddress(),
-      await mockERC20.getAddress()
+    if (!event) {
+      throw new Error("PanelAndSharesCreated event not found");
+    }
+    
+    const parsedLog = factory.interface.parseLog(event);
+    panelId = parsedLog.args.panelId;
+    const shareTokenAddress = parsedLog.args.shareToken;
+    
+    shareToken = await ethers.getContractAt("ShareToken", shareTokenAddress);
+    
+    // Transfer some shares to users
+    await shareToken.transfer(user1.address, user1Shares);
+    await shareToken.transfer(user2.address, user2Shares);
+    
+    // Deploy MockERC20 using upgrades.deployProxy
+    const MockERC20Factory = await ethers.getContractFactory("MockERC20");
+    mockToken = await upgrades.deployProxy(
+      MockERC20Factory,
+      ["USD Coin", "USDC"],
+      { initializer: "initialize", kind: "uups" }
+    );
+    await mockToken.waitForDeployment();
+    
+    // Mint tokens to owner for distribution
+    await mockToken.mint(owner.address, ethers.parseEther("1000"));
+    
+    // Deploy DividendDistributor using upgrades.deployProxy
+    const DividendDistributorFactory = await ethers.getContractFactory("DividendDistributor");
+    dividendDistributor = await upgrades.deployProxy(
+      DividendDistributorFactory,
+      [
+        await shareToken.getAddress(),
+        await solarPanelRegistry.getAddress(),
+        await mockToken.getAddress()
+      ],
+      { initializer: "initialize", kind: "uups" }
     );
     await dividendDistributor.waitForDeployment();
     
@@ -59,41 +119,26 @@ describe("DividendDistributor", function () {
     await solarPanelRegistry.grantRole(ADMIN_ROLE, owner.address);
     await shareToken.grantRole(MINTER_ROLE, owner.address);
     await dividendDistributor.grantRole(DISTRIBUTOR_ROLE, owner.address);
-    
-    // Register a test panel
-    await solarPanelRegistry.registerPanelByFactory(
-      "TEST001",
-      "TestManufacturer",
-      "Test Panel",
-      "Test Location",
-      5000,
-      owner.address
-    );
-    
-    panelId = await solarPanelRegistry.serialNumberToId("TEST001");
-    
-    // Mint shares for the panel
-    await shareToken.mintShares(panelId, totalShares);
-    
-    // Transfer some shares to users
-    await shareToken.transferPanelShares(panelId, user1.address, user1Shares);
-    await shareToken.transferPanelShares(panelId, user2.address, user2Shares);
-    
-    // Mint tokens to owner for distribution
-    await mockERC20.mint(owner.address, ethers.parseEther("1000"));
+    await dividendDistributor.grantRole(ADMIN_ROLE, owner.address);
     
     // Approve tokens for distributor
-    await mockERC20.approve(await dividendDistributor.getAddress(), ethers.parseEther("1000"));
+    await mockToken.approve(await dividendDistributor.getAddress(), ethers.parseEther("1000"));
   });
 
   describe("Deployment", function () {
     it("Should set the right owner", async function () {
-      expect(await dividendDistributor.hasRole(DEFAULT_ADMIN_ROLE, owner.address)).to.be.true;
+      expect(await dividendDistributor.hasRole(ADMIN_ROLE, owner.address)).to.be.true;
+    });
+
+    it("Should set the right roles", async function () {
+      expect(await dividendDistributor.hasRole(ADMIN_ROLE, owner.address)).to.be.true;
+      expect(await dividendDistributor.hasRole(DISTRIBUTOR_ROLE, owner.address)).to.be.true;
     });
 
     it("Should set the right token addresses", async function () {
       expect(await dividendDistributor.shareToken()).to.equal(await shareToken.getAddress());
-      expect(await dividendDistributor.paymentToken()).to.equal(await mockERC20.getAddress());
+      expect(await dividendDistributor.panelRegistry()).to.equal(await solarPanelRegistry.getAddress());
+      expect(await dividendDistributor.paymentToken()).to.equal(await mockToken.getAddress());
     });
   });
 
@@ -159,7 +204,7 @@ describe("DividendDistributor", function () {
       const user1ExpectedDividends = dividendAmount * user1Shares / totalShares;
       
       // Check initial balance
-      const initialBalance = await mockERC20.balanceOf(user1.address);
+      const initialBalance = await mockToken.balanceOf(user1.address);
       
       // Claim dividends
       await expect(
@@ -168,7 +213,7 @@ describe("DividendDistributor", function () {
         .withArgs(panelId, user1.address, user1ExpectedDividends);
       
       // Check final balance
-      const finalBalance = await mockERC20.balanceOf(user1.address);
+      const finalBalance = await mockToken.balanceOf(user1.address);
       expect(finalBalance - initialBalance).to.equal(user1ExpectedDividends);
       
       // Check unclaimed dividends are now 0
@@ -215,9 +260,9 @@ describe("DividendDistributor", function () {
       // Claim all dividends
       const user1ExpectedDividends = (dividendAmount + secondDividendAmount) * user1Shares / totalShares;
       
-      const initialBalance = await mockERC20.balanceOf(user1.address);
+      const initialBalance = await mockToken.balanceOf(user1.address);
       await dividendDistributor.connect(user1).claimDividends(panelId);
-      const finalBalance = await mockERC20.balanceOf(user1.address);
+      const finalBalance = await mockToken.balanceOf(user1.address);
       
       expect(finalBalance - initialBalance).to.equal(user1ExpectedDividends);
     });
@@ -246,7 +291,7 @@ describe("DividendDistributor", function () {
     it("Should not allow non-admins to pause", async function () {
       await expect(
         dividendDistributor.connect(user1).pause()
-      ).to.be.revertedWith("AccessControl: account " + user1.address.toLowerCase() + " is missing role " + DEFAULT_ADMIN_ROLE);
+      ).to.be.revertedWith("AccessControl: account " + user1.address.toLowerCase() + " is missing role " + ADMIN_ROLE);
     });
   });
 }); 

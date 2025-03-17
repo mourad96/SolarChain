@@ -449,4 +449,68 @@ export class BlockchainService {
       throw new Error('Failed to get owner panels from blockchain');
     }
   }
+
+  async getTokenPrice(panelId: string): Promise<string | null> {
+    try {
+      this.checkInitialization();
+      
+      // In a real implementation, this would call a blockchain contract method
+      // For now, we'll return a simulated price based on the panel ID
+      // This is just a placeholder until the actual blockchain integration is complete
+      
+      // Generate a deterministic but seemingly random price based on the panel ID
+      const hash = ethers.id(panelId);
+      const numericValue = parseInt(hash.slice(2, 10), 16);
+      const price = (10 + (numericValue % 90)) / 10; // Price between $1.0 and $10.0
+      
+      return price.toFixed(2);
+    } catch (error) {
+      logger.error('Error getting token price:', error);
+      return null;
+    }
+  }
+
+  async getEstimatedROI(panelId: string): Promise<number | null> {
+    try {
+      this.checkInitialization();
+      
+      // In a real implementation, this would calculate ROI based on historical data
+      // and blockchain information. For now, we'll return a simulated ROI.
+      
+      // Generate a deterministic but seemingly random ROI based on the panel ID
+      const hash = ethers.id(panelId);
+      const numericValue = parseInt(hash.slice(2, 10), 16);
+      const roi = 8 + (numericValue % 15); // ROI between 8% and 22%
+      
+      return roi;
+    } catch (error) {
+      logger.error('Error calculating estimated ROI:', error);
+      return null;
+    }
+  }
+
+  async getPanelById(panelId: string): Promise<any> {
+    try {
+      this.checkInitialization();
+      
+      // In a real implementation, this would call a blockchain contract method
+      // For now, we'll return simulated data
+      
+      // Generate deterministic but seemingly random data based on panel ID
+      const hash = ethers.id(panelId);
+      const numericValue = parseInt(hash.slice(2, 10), 16);
+      
+      return {
+        tokenId: (numericValue % 10000).toString(),
+        totalSupply: (100 + (numericValue % 900)).toString(),
+        availableSupply: (20 + (numericValue % 80)).toString(),
+        owner: `0x${hash.slice(2, 42)}`,
+        isActive: true,
+        registrationDate: Math.floor(Date.now() / 1000) - (numericValue % 10000000)
+      };
+    } catch (error) {
+      logger.error('Error getting panel by ID from blockchain:', error);
+      return null;
+    }
+  }
 } 

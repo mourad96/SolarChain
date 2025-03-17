@@ -88,4 +88,11 @@ router.patch(
   panelController.setPanelStatus.bind(panelController)
 );
 
+// Get projects for investors
+router.get(
+  '/projects/investors',
+  requireAuth as any,
+  panelController.getProjectsForInvestors.bind(panelController)
+);
+
 export { router as panelRouter }; 

@@ -1,107 +1,110 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.9;
 
-import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "./SolarPanelRegistry.sol";
+import "./ShareToken.sol";
 
 /**
  * @title SolarPanelFactory
- * @dev Factory contract for registering solar panels
+ * @dev Factory contract for creating solar panels and their associated share tokens
+ * @notice This contract is upgradeable using the UUPS proxy pattern
  */
-contract SolarPanelFactory is AccessControl, Pausable {
+contract SolarPanelFactory is 
+    AccessControlUpgradeable, 
+    PausableUpgradeable,
+    UUPSUpgradeable 
+{
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 public constant REGISTRAR_ROLE = keccak256("REGISTRAR_ROLE");
+    bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
     
     SolarPanelRegistry public registry;
+    uint256 public minimumPanelCapacity;
     
-    event BatchPanelsRegistered(uint256 count, address indexed owner);
+    event PanelAndSharesCreated(
+        uint256 indexed panelId, 
+        address indexed shareToken, 
+        address indexed owner,
+        string externalId,
+        uint256 totalShares
+    );
+    
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
     
     /**
-     * @dev Constructor that sets the registry address
-     * @param _registryAddress The address of the SolarPanelRegistry contract
+     * @dev Initializes the contract replacing the constructor for upgradeable contracts
      */
-    constructor(address _registryAddress) {
+    function initialize(
+        address _registryAddress
+    ) public initializer {
+        __AccessControl_init();
+        __Pausable_init();
+        __UUPSUpgradeable_init();
+        
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(ADMIN_ROLE, msg.sender);
+        _grantRole(REGISTRAR_ROLE, msg.sender);
+        _grantRole(UPGRADER_ROLE, msg.sender);
+        
         require(_registryAddress != address(0), "Invalid registry address");
-        
-        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _setupRole(ADMIN_ROLE, msg.sender);
-        _setupRole(REGISTRAR_ROLE, msg.sender);
-        
         registry = SolarPanelRegistry(_registryAddress);
+        minimumPanelCapacity = 1 ether / 10; // 0.1 ETH
     }
     
     /**
-     * @dev Registers multiple panels at once for the caller
-     * @param _serialNumbers Array of serial numbers
-     * @param _manufacturers Array of manufacturers
-     * @param _names Array of panel names
-     * @param _locations Array of panel locations
-     * @param _capacities Array of capacities
+     * @dev Required by the UUPSUpgradeable module
      */
-    function registerPanelsBatch(
-        string[] memory _serialNumbers,
-        string[] memory _manufacturers,
-        string[] memory _names,
-        string[] memory _locations,
-        uint256[] memory _capacities
-    ) external whenNotPaused {
-        require(_serialNumbers.length == _manufacturers.length, "Arrays length mismatch");
-        require(_serialNumbers.length == _names.length, "Arrays length mismatch");
-        require(_serialNumbers.length == _locations.length, "Arrays length mismatch");
-        require(_serialNumbers.length == _capacities.length, "Arrays length mismatch");
-        require(_serialNumbers.length > 0, "Empty arrays");
-        
-        for (uint256 i = 0; i < _serialNumbers.length; i++) {
-            registry.registerPanelByFactory(
-                _serialNumbers[i],
-                _manufacturers[i],
-                _names[i],
-                _locations[i],
-                _capacities[i],
-                msg.sender
-            );
-        }
-        
-        emit BatchPanelsRegistered(_serialNumbers.length, msg.sender);
-    }
+    function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
     
     /**
-     * @dev Registers multiple panels at once for specified owners (admin only)
-     * @param _serialNumbers Array of serial numbers
-     * @param _manufacturers Array of manufacturers
-     * @param _names Array of panel names
-     * @param _locations Array of panel locations
-     * @param _capacities Array of capacities
-     * @param _owners Array of panel owners
+     * @dev Creates a new solar panel with its associated share token in a single transaction
      */
-    function registerPanelsBatchForOwners(
-        string[] memory _serialNumbers,
-        string[] memory _manufacturers,
-        string[] memory _names,
-        string[] memory _locations,
-        uint256[] memory _capacities,
-        address[] memory _owners
-    ) public whenNotPaused onlyRole(REGISTRAR_ROLE) {
-        require(_serialNumbers.length == _manufacturers.length, "Arrays length mismatch");
-        require(_serialNumbers.length == _names.length, "Arrays length mismatch");
-        require(_serialNumbers.length == _locations.length, "Arrays length mismatch");
-        require(_serialNumbers.length == _capacities.length, "Arrays length mismatch");
-        require(_serialNumbers.length == _owners.length, "Arrays length mismatch");
-        require(_serialNumbers.length > 0, "Empty arrays");
+    function createPanelWithShares(
+        string memory externalId,
+        string memory tokenName,
+        string memory tokenSymbol,
+        uint256 totalShares
+    ) public whenNotPaused onlyRole(REGISTRAR_ROLE) returns (uint256 panelId, address tokenAddress) {
+        require(bytes(externalId).length > 0, "External ID cannot be empty");
+        require(bytes(tokenName).length > 0, "Token name cannot be empty");
+        require(bytes(tokenSymbol).length > 0, "Token symbol cannot be empty");
+        require(totalShares > 0, "Total shares must be greater than 0");
         
-        for (uint256 i = 0; i < _serialNumbers.length; i++) {
-            registry.registerPanelByFactory(
-                _serialNumbers[i],
-                _manufacturers[i],
-                _names[i],
-                _locations[i],
-                _capacities[i],
-                _owners[i]
-            );
-        }
+        // Register panel and deploy token
+        panelId = registry.registerPanelByFactory(externalId, minimumPanelCapacity, msg.sender);
         
-        emit BatchPanelsRegistered(_serialNumbers.length, address(0));
+        ShareToken implementation = new ShareToken();
+        bytes memory initData = abi.encodeWithSelector(
+            ShareToken(address(0)).initialize.selector,
+            tokenName,
+            tokenSymbol,
+            address(registry),
+            panelId
+        );
+        ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
+        ShareToken shareToken = ShareToken(address(proxy));
+        
+        registry.linkShareToken(panelId, address(shareToken));
+        shareToken.updatePanelMetadata(externalId);
+        
+        // Mint all shares to the sender
+        shareToken.mintShares(totalShares, msg.sender);
+        
+        // Transfer ownership
+        shareToken.grantRole(shareToken.DEFAULT_ADMIN_ROLE(), msg.sender);
+        shareToken.grantRole(shareToken.ADMIN_ROLE(), msg.sender);
+        shareToken.grantRole(shareToken.MINTER_ROLE(), msg.sender);
+        
+        emit PanelAndSharesCreated(panelId, address(shareToken), msg.sender, externalId, totalShares);
+        return (panelId, address(shareToken));
     }
     
     /**

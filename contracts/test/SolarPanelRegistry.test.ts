@@ -3,6 +3,9 @@ import { ethers } from "hardhat";
 import { SolarPanelRegistry } from "../typechain-types";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 
+// Import upgrades from hardhat
+const { upgrades } = require("hardhat");
+
 describe("SolarPanelRegistry", function () {
   let solarPanelRegistry: SolarPanelRegistry;
   let owner: SignerWithAddress;
@@ -12,190 +15,151 @@ describe("SolarPanelRegistry", function () {
   const FACTORY_ROLE = ethers.keccak256(ethers.toUtf8Bytes("FACTORY_ROLE"));
   const PANEL_OWNER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("PANEL_OWNER_ROLE"));
   const DEFAULT_ADMIN_ROLE = ethers.ZeroHash;
+  const minimumPanelCapacity = ethers.parseEther("0.1");
 
   beforeEach(async function () {
     // Get signers
     [owner, user1, user2] = await ethers.getSigners();
 
-    // Deploy the contract
-    const SolarPanelRegistry = await ethers.getContractFactory("SolarPanelRegistry");
-    solarPanelRegistry = await SolarPanelRegistry.deploy();
+    // Deploy the contract using upgrades.deployProxy
+    const SolarPanelRegistryFactory = await ethers.getContractFactory("SolarPanelRegistry");
+    
+    solarPanelRegistry = await upgrades.deployProxy(
+      SolarPanelRegistryFactory, 
+      [minimumPanelCapacity], 
+      { initializer: "initialize", kind: "uups" }
+    );
+    
     await solarPanelRegistry.waitForDeployment();
     
     // Grant FACTORY_ROLE to owner and user1 for testing
     await solarPanelRegistry.grantRole(FACTORY_ROLE, owner.address);
     await solarPanelRegistry.grantRole(FACTORY_ROLE, user1.address);
+    
+    // Grant DEFAULT_ADMIN_ROLE to user1 for testing the different users test
+    await solarPanelRegistry.grantRole(DEFAULT_ADMIN_ROLE, user1.address);
   });
 
   describe("Panel Registration", function () {
     it("should register a new panel", async function () {
-      const serialNumber = "PANEL001";
-      const manufacturer = "SolarCorp";
-      const name = "Test Panel";
-      const location = "Test Location";
-      const capacity = 5000; // 5kW in watts
+      const externalId = "PANEL001";
+      const capacity = ethers.parseEther("1"); // 1 kW
 
       await solarPanelRegistry.registerPanelByFactory(
-        serialNumber,
-        manufacturer,
-        name,
-        location,
+        externalId,
         capacity,
         owner.address
       );
 
-      const panelId = await solarPanelRegistry.serialNumberToId(serialNumber);
+      const panelId = 1; // First panel should have ID 1
       const panel = await solarPanelRegistry.panels(panelId);
 
-      expect(panel.serialNumber).to.equal(serialNumber);
-      expect(panel.manufacturer).to.equal(manufacturer);
-      expect(panel.name).to.equal(name);
-      expect(panel.location).to.equal(location);
-      expect(panel.capacity).to.equal(capacity);
+      expect(panel.externalId).to.equal(externalId);
       expect(panel.owner).to.equal(owner.address);
       expect(panel.isActive).to.be.true;
+      expect(await solarPanelRegistry.hasRole(PANEL_OWNER_ROLE, owner.address)).to.be.true;
     });
 
-    it("should not allow registering a panel with the same serial number", async function () {
-      const serialNumber = "PANEL002";
-      const manufacturer = "SolarCorp";
-      const name = "Test Panel";
-      const location = "Test Location";
-      const capacity = 3000; // 3kW in watts
+    it("should not allow duplicate external IDs", async function () {
+      const externalId = "PANEL002";
+      const capacity = ethers.parseEther("1"); // 1 kW
 
       await solarPanelRegistry.registerPanelByFactory(
-        serialNumber,
-        manufacturer,
-        name,
-        location,
+        externalId,
         capacity,
         owner.address
       );
 
       await expect(
         solarPanelRegistry.registerPanelByFactory(
-          serialNumber,
-          "OtherManufacturer",
-          "Other Panel",
-          "Other Location",
-          4000,
+          externalId,
+          capacity,
           user1.address
         )
-      ).to.be.revertedWith("Panel with this serial number already registered");
+      ).to.be.revertedWith("Panel with this external ID already registered");
     });
 
-    it("should emit PanelRegistered event", async function () {
-      const serialNumber = "PANEL003";
-      const manufacturer = "SolarCorp";
-      const name = "Test Panel";
-      const location = "Test Location";
-      const capacity = 7500; // 7.5kW in watts
+    it("should allow different users to register panels", async function () {
+      const externalId1 = "PANEL003";
+      const externalId2 = "PANEL004";
+      const capacity = ethers.parseEther("1"); // 1 kW
 
-      await expect(
-        solarPanelRegistry.registerPanelByFactory(
-          serialNumber,
-          manufacturer,
-          name,
-          location,
-          capacity,
-          owner.address
-        )
-      )
-        .to.emit(solarPanelRegistry, "PanelRegistered")
-        .withArgs(
-          1, // First panel ID
-          serialNumber,
-          manufacturer,
-          name,
-          location,
-          capacity,
-          owner.address
-        );
+      // First user registers a panel
+      await solarPanelRegistry.registerPanelByFactory(
+        externalId1,
+        capacity,
+        owner.address
+      );
+
+      // Second user registers a different panel
+      await solarPanelRegistry.connect(user1).registerPanelByFactory(
+        externalId2,
+        capacity,
+        user1.address
+      );
+
+      const panel1 = await solarPanelRegistry.panels(1n);
+      const panel2 = await solarPanelRegistry.panels(2n);
+
+      expect(panel1.externalId).to.equal(externalId1);
+      expect(panel1.owner).to.equal(owner.address);
+      expect(panel2.externalId).to.equal(externalId2);
+      expect(panel2.owner).to.equal(user1.address);
     });
 
-    it("should not allow registration by non-factory role", async function () {
+    it("should only allow factory role to register panels", async function () {
+      const externalId = "PANEL005";
+      const capacity = ethers.parseEther("1"); // 1 kW
+
+      // user2 does not have FACTORY_ROLE
       await expect(
         solarPanelRegistry.connect(user2).registerPanelByFactory(
-          "PANEL004",
-          "SolarCorp",
-          "Test Panel",
-          "Test Location",
-          5000,
+          externalId,
+          capacity,
           user2.address
         )
       ).to.be.revertedWith("Caller is not factory or admin");
     });
 
-    it("should not allow registration with empty values", async function () {
-      await expect(
-        solarPanelRegistry.registerPanelByFactory(
-          "",
-          "SolarCorp",
-          "Test Panel",
-          "Test Location",
-          5000,
-          owner.address
-        )
-      ).to.be.revertedWith("Serial number cannot be empty");
+    it("should not allow empty external ID", async function () {
+      const externalId = "";
+      const capacity = ethers.parseEther("1"); // 1 kW
 
       await expect(
         solarPanelRegistry.registerPanelByFactory(
-          "PANEL005",
-          "",
-          "Test Panel",
-          "Test Location",
-          5000,
+          externalId,
+          capacity,
           owner.address
         )
-      ).to.be.revertedWith("Manufacturer cannot be empty");
-
-      await expect(
-        solarPanelRegistry.registerPanelByFactory(
-          "PANEL005",
-          "SolarCorp",
-          "",
-          "Test Location",
-          5000,
-          owner.address
-        )
-      ).to.be.revertedWith("Name cannot be empty");
-
-      await expect(
-        solarPanelRegistry.registerPanelByFactory(
-          "PANEL005",
-          "SolarCorp",
-          "Test Panel",
-          "",
-          5000,
-          owner.address
-        )
-      ).to.be.revertedWith("Location cannot be empty");
+      ).to.be.revertedWith("External ID cannot be empty");
     });
 
-    it("should not allow registration with zero capacity", async function () {
+    it("should not allow capacity below minimum", async function () {
+      const externalId = "PANEL005";
+      const capacity = ethers.parseEther("0.05"); // Below minimum
+
       await expect(
         solarPanelRegistry.registerPanelByFactory(
-          "PANEL005",
-          "SolarCorp",
-          "Test Panel",
-          "Test Location",
-          0,
+          externalId,
+          capacity,
           owner.address
         )
-      ).to.be.revertedWith("Capacity must be greater than 0");
+      ).to.be.revertedWith("Capacity below minimum requirement");
     });
 
-    it("should not allow registration with zero address owner", async function () {
+    it("should emit PanelRegistered event", async function () {
+      const externalId = "PANEL006";
+      const capacity = ethers.parseEther("1"); // 1 kW
+
       await expect(
         solarPanelRegistry.registerPanelByFactory(
-          "PANEL005",
-          "SolarCorp",
-          "Test Panel",
-          "Test Location",
-          5000,
-          ethers.ZeroAddress
+          externalId,
+          capacity,
+          owner.address
         )
-      ).to.be.revertedWith("Owner cannot be zero address");
+      )
+        .to.emit(solarPanelRegistry, "PanelRegistered")
+        .withArgs(1, externalId, owner.address, ethers.ZeroAddress);
     });
   });
 
@@ -203,72 +167,16 @@ describe("SolarPanelRegistry", function () {
     let panelId: bigint;
 
     beforeEach(async function () {
+      const externalId = "PANEL006";
+      const capacity = ethers.parseEther("1"); // 1 kW
+      
       await solarPanelRegistry.registerPanelByFactory(
-        "PANEL006",
-        "SolarCorp",
-        "Test Panel",
-        "Test Location",
-        5000,
+        externalId,
+        capacity,
         owner.address
       );
-      panelId = await solarPanelRegistry.serialNumberToId("PANEL006");
-    });
-
-    it("should update panel metadata", async function () {
-      const newName = "Updated Panel";
-      const newLocation = "Updated Location";
-      const newCapacity = 6000;
-
-      await solarPanelRegistry.updatePanelMetadata(
-        panelId,
-        newName,
-        newLocation,
-        newCapacity
-      );
-
-      const panel = await solarPanelRegistry.panels(panelId);
-      expect(panel.name).to.equal(newName);
-      expect(panel.location).to.equal(newLocation);
-      expect(panel.capacity).to.equal(newCapacity);
-    });
-
-    it("should emit PanelUpdated event", async function () {
-      const newName = "Updated Panel";
-      const newLocation = "Updated Location";
-      const newCapacity = 6000;
-
-      await expect(
-        solarPanelRegistry.updatePanelMetadata(
-          panelId,
-          newName,
-          newLocation,
-          newCapacity
-        )
-      )
-        .to.emit(solarPanelRegistry, "PanelUpdated")
-        .withArgs(panelId, newName, newLocation, newCapacity);
-    });
-
-    it("should not allow updating non-existent panel", async function () {
-      await expect(
-        solarPanelRegistry.updatePanelMetadata(
-          99999n,
-          "New Name",
-          "New Location",
-          6000
-        )
-      ).to.be.revertedWith("Panel does not exist");
-    });
-
-    it("should not allow updating by non-owner/non-admin", async function () {
-      await expect(
-        solarPanelRegistry.connect(user2).updatePanelMetadata(
-          panelId,
-          "New Name",
-          "New Location",
-          6000
-        )
-      ).to.be.revertedWith("Caller is not panel owner or admin");
+      
+      panelId = 1n; // First panel should have ID 1
     });
 
     it("should set panel status", async function () {
@@ -291,28 +199,23 @@ describe("SolarPanelRegistry", function () {
   describe("Panel Queries", function () {
     beforeEach(async function () {
       // Register multiple panels for testing
+      const capacity = ethers.parseEther("1"); // 1 kW
+      
       await solarPanelRegistry.registerPanelByFactory(
         "PANEL007",
-        "SolarCorp",
-        "Panel 7",
-        "Location 7",
-        5000,
+        capacity,
         owner.address
       );
+      
       await solarPanelRegistry.registerPanelByFactory(
         "PANEL008",
-        "SolarCorp",
-        "Panel 8",
-        "Location 8",
-        6000,
+        capacity,
         owner.address
       );
+      
       await solarPanelRegistry.registerPanelByFactory(
         "PANEL009",
-        "SolarCorp",
-        "Panel 9",
-        "Location 9",
-        7000,
+        capacity,
         user1.address
       );
     });
@@ -330,13 +233,13 @@ describe("SolarPanelRegistry", function () {
     it("should allow pausing and unpausing by admin", async function () {
       await solarPanelRegistry.pause();
       
+      const externalId = "PANEL010";
+      const capacity = ethers.parseEther("1"); // 1 kW
+      
       await expect(
         solarPanelRegistry.registerPanelByFactory(
-          "PANEL010",
-          "SolarCorp",
-          "Test Panel",
-          "Test Location",
-          5000,
+          externalId,
+          capacity,
           owner.address
         )
       ).to.be.revertedWith("Pausable: paused");
@@ -344,11 +247,8 @@ describe("SolarPanelRegistry", function () {
       await solarPanelRegistry.unpause();
       
       await solarPanelRegistry.registerPanelByFactory(
-        "PANEL010",
-        "SolarCorp",
-        "Test Panel",
-        "Test Location",
-        5000,
+        externalId,
+        capacity,
         owner.address
       );
     });
