@@ -1,5 +1,5 @@
 // Script to upgrade contracts using OpenZeppelin's upgrades plugin
-const { ethers, upgrades, network } = require("hardhat");
+const { ethers, upgrades, network, run } = require("hardhat");
 const fs = require("fs");
 const path = require("path");
 const { updateFiles } = require("./update-addresses");
@@ -40,7 +40,9 @@ async function main() {
   if (process.env.UPGRADE_REGISTRY === "true") {
     console.log("Upgrading SolarPanelRegistry...");
     const SolarPanelRegistry = await ethers.getContractFactory("SolarPanelRegistry");
-    const upgradedRegistry = await upgrades.upgradeProxy(deploymentData.registry, SolarPanelRegistry);
+    const upgradedRegistry = await upgrades.upgradeProxy(deploymentData.registry, SolarPanelRegistry, {
+      kind: "uups"
+    });
     await upgradedRegistry.waitForDeployment();
     const registryAddress = await upgradedRegistry.getAddress();
     console.log(`SolarPanelRegistry upgraded at: ${registryAddress}`);
@@ -51,7 +53,9 @@ async function main() {
   if (process.env.UPGRADE_FACTORY === "true") {
     console.log("Upgrading SolarPanelFactory...");
     const SolarPanelFactory = await ethers.getContractFactory("SolarPanelFactory");
-    const upgradedFactory = await upgrades.upgradeProxy(deploymentData.factory, SolarPanelFactory);
+    const upgradedFactory = await upgrades.upgradeProxy(deploymentData.factory, SolarPanelFactory, {
+      kind: "uups"
+    });
     await upgradedFactory.waitForDeployment();
     const factoryAddress = await upgradedFactory.getAddress();
     console.log(`SolarPanelFactory upgraded at: ${factoryAddress}`);
@@ -62,7 +66,9 @@ async function main() {
   if (process.env.UPGRADE_SHARETOKEN === "true" && deploymentData.shareToken) {
     console.log("Upgrading ShareToken...");
     const ShareToken = await ethers.getContractFactory("ShareToken");
-    const upgradedShareToken = await upgrades.upgradeProxy(deploymentData.shareToken, ShareToken);
+    const upgradedShareToken = await upgrades.upgradeProxy(deploymentData.shareToken, ShareToken, {
+      kind: "uups"
+    });
     await upgradedShareToken.waitForDeployment();
     const shareTokenAddress = await upgradedShareToken.getAddress();
     console.log(`ShareToken upgraded at: ${shareTokenAddress}`);
@@ -73,7 +79,9 @@ async function main() {
   if (process.env.UPGRADE_DISTRIBUTOR === "true") {
     console.log("Upgrading DividendDistributor...");
     const DividendDistributor = await ethers.getContractFactory("DividendDistributor");
-    const upgradedDistributor = await upgrades.upgradeProxy(deploymentData.dividendDistributor, DividendDistributor);
+    const upgradedDistributor = await upgrades.upgradeProxy(deploymentData.dividendDistributor, DividendDistributor, {
+      kind: "uups"
+    });
     await upgradedDistributor.waitForDeployment();
     const distributorAddress = await upgradedDistributor.getAddress();
     console.log(`DividendDistributor upgraded at: ${distributorAddress}`);

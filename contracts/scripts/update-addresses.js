@@ -3,6 +3,25 @@ const fs = require('fs');
 const path = require('path');
 const { ethers, upgrades } = require('hardhat');
 
+// Function to get the latest deployment data
+function getLatestDeployment() {
+  const deploymentsDir = path.join(__dirname, '../deployments');
+  const deploymentFiles = fs.readdirSync(deploymentsDir)
+    .filter(file => file.startsWith('deployment-amoy-'))
+    .sort((a, b) => {
+      const timeA = new Date(a.split('-').slice(2).join('-').replace('.json', '').replace(/-/g, ':'));
+      const timeB = new Date(b.split('-').slice(2).join('-').replace('.json', '').replace(/-/g, ':'));
+      return timeB - timeA;
+    });
+
+  if (deploymentFiles.length === 0) {
+    throw new Error('No deployment files found');
+  }
+
+  const latestDeploymentPath = path.join(deploymentsDir, deploymentFiles[0]);
+  return JSON.parse(fs.readFileSync(latestDeploymentPath, 'utf8'));
+}
+
 // Function to update .env file with contract addresses
 async function updateEnvFile(addresses) {
   const envPath = path.join(__dirname, '../.env');
@@ -61,7 +80,7 @@ MOCK_ERC20_ADDRESS=${addresses.paymentToken}
   
   // Write updated content back to .env
   try {
-    fs.writeFileSync(envPath, envContent);
+    fs.writeFileSync(envPath, envContent.trim() + '\n');
     console.log('Updated .env file with contract addresses');
   } catch (error) {
     console.error('Error writing to .env file:', error);
@@ -104,32 +123,38 @@ async function updateReadmeFile(addresses) {
   const deploymentInfoSection = `
 ## Deployed Contracts (Amoy Testnet)
 
-| Contract | Proxy Address | Implementation Address |
-|----------|---------------|------------------------|
-| SolarPanelRegistry | [${addresses.registry}](https://amoy.polygonscan.com/address/${addresses.registry}) | [${implementationAddresses.registryImpl}](https://amoy.polygonscan.com/address/${implementationAddresses.registryImpl}) |
-| SolarPanelFactory | [${addresses.factory}](https://amoy.polygonscan.com/address/${addresses.factory}) | [${implementationAddresses.factoryImpl}](https://amoy.polygonscan.com/address/${implementationAddresses.factoryImpl}) |
-| ShareToken | [${addresses.shareToken}](https://amoy.polygonscan.com/address/${addresses.shareToken}) | [${implementationAddresses.shareTokenImpl}](https://amoy.polygonscan.com/address/${implementationAddresses.shareTokenImpl}) |
-| DividendDistributor | [${addresses.dividendDistributor}](https://amoy.polygonscan.com/address/${addresses.dividendDistributor}) | [${implementationAddresses.dividendDistributorImpl}](https://amoy.polygonscan.com/address/${implementationAddresses.dividendDistributorImpl}) |
-| MockERC20 (USDC) | [${addresses.paymentToken}](https://amoy.polygonscan.com/address/${addresses.paymentToken}) | N/A (not upgradeable) |
+| Contract | Address | Implementation |
+|----------|---------|----------------|
+| SolarPanelRegistry | [${addresses.registry}](https://amoy.polygonscan.com/address/${addresses.registry}) | [View](https://amoy.polygonscan.com/address/${implementationAddresses.registryImpl}) |
+| SolarPanelFactory | [${addresses.factory}](https://amoy.polygonscan.com/address/${addresses.factory}) | [View](https://amoy.polygonscan.com/address/${implementationAddresses.factoryImpl}) |
+| ShareToken | [${addresses.shareToken}](https://amoy.polygonscan.com/address/${addresses.shareToken}) | [View](https://amoy.polygonscan.com/address/${implementationAddresses.shareTokenImpl}) |
+| DividendDistributor | [${addresses.dividendDistributor}](https://amoy.polygonscan.com/address/${addresses.dividendDistributor}) | [View](https://amoy.polygonscan.com/address/${implementationAddresses.dividendDistributorImpl}) |
+| MockERC20 (USDC) | [${addresses.paymentToken}](https://amoy.polygonscan.com/address/${addresses.paymentToken}) | N/A |
 
 > Note: These contracts are upgradeable using the UUPS proxy pattern. The proxy address is the address you interact with, while the implementation address contains the actual logic.
 
-Last deployed: ${new Date().toISOString()}
+Last deployed: ${addresses.timestamp}
 `;
   
   // Check if deployment info section already exists
-  if (readmeContent.includes('## Deployed Contracts (Amoy Testnet)')) {
+  const oldSectionRegex = /## Deployed Contracts \(Amoy Testnet\)[\s\S]*?(?=\n## |$)/;
+  if (readmeContent.match(oldSectionRegex)) {
     // Replace existing section
-    const regex = /## Deployed Contracts \(Amoy Testnet\)[\s\S]*?(?=\n## |$)/;
-    readmeContent = readmeContent.replace(regex, deploymentInfoSection);
+    readmeContent = readmeContent.replace(oldSectionRegex, deploymentInfoSection.trim());
   } else {
-    // Append to file
-    readmeContent += deploymentInfoSection;
+    // Append to file before the last section (if exists) or at the end
+    const lastSectionMatch = readmeContent.match(/\n## [^\n]+[^\n]*$/);
+    if (lastSectionMatch) {
+      const insertPosition = lastSectionMatch.index;
+      readmeContent = readmeContent.slice(0, insertPosition) + '\n' + deploymentInfoSection.trim() + '\n' + readmeContent.slice(insertPosition);
+    } else {
+      readmeContent += '\n' + deploymentInfoSection;
+    }
   }
   
   // Write updated content back to README.md
   try {
-    fs.writeFileSync(readmePath, readmeContent);
+    fs.writeFileSync(readmePath, readmeContent.trim() + '\n');
     console.log('Updated README.md file with contract addresses');
   } catch (error) {
     console.error('Error writing to README.md file:', error);
@@ -144,31 +169,17 @@ async function updateFiles(addresses) {
   console.log('Files updated successfully!');
 }
 
-// Export the function for use in other scripts
-module.exports = { updateFiles };
-
-// If script is run directly, read addresses from command line arguments
+// If script is run directly, use the latest deployment file
 if (require.main === module) {
-  const args = process.argv.slice(2);
+  const deploymentData = getLatestDeployment();
   
-  // Check if addresses are provided as command line arguments
-  if (args.length < 5) {
-    console.error('Usage: node update-addresses.js <registry> <factory> <shareToken> <dividendDistributor> <paymentToken>');
-    process.exit(1);
-  }
-  
-  const addresses = {
-    registry: args[0],
-    factory: args[1],
-    shareToken: args[2],
-    dividendDistributor: args[3],
-    paymentToken: args[4]
-  };
-  
-  updateFiles(addresses)
+  updateFiles(deploymentData)
     .then(() => process.exit(0))
     .catch((error) => {
       console.error('Error updating files:', error);
       process.exit(1);
     });
-} 
+}
+
+// Export functions for use in other scripts
+module.exports = { updateFiles, getLatestDeployment }; 

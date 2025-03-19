@@ -40,6 +40,7 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
   const investorNavItems = [
     { name: 'Overview', href: '/dashboard/investor' },
     { name: 'Projects', href: '/dashboard/projects' },
+    { name: 'Investments', href: '/dashboard/investments' },
     { name: 'Portfolio', href: '/dashboard/portfolio' },
   ];
 

@@ -17,6 +17,18 @@ router.post(
     body('capacity')
       .isFloat({ min: 0 })
       .withMessage('Capacity must be a positive number'),
+    body('tokenName')
+      .optional()
+      .trim(),
+    body('tokenSymbol')
+      .optional()
+      .trim()
+      .isLength({ max: 6 })
+      .withMessage('Token symbol cannot be longer than 6 characters'),
+    body('totalShares')
+      .optional()
+      .isInt({ min: 1 })
+      .withMessage('Total shares must be a positive integer'),
   ],
   validateRequest as any,
   panelController.createPanel.bind(panelController)
@@ -94,5 +106,9 @@ router.get(
   requireAuth as any,
   panelController.getProjectsForInvestors.bind(panelController)
 );
+
+// Investment routes
+router.post('/projects/:panelId/invest', requireAuth as any, panelController.investInProject);
+router.get('/investments', requireAuth as any, panelController.getUserInvestments);
 
 export { router as panelRouter }; 

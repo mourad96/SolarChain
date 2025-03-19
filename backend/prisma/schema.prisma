@@ -15,25 +15,29 @@ model User {
   email         String    @unique
   name          String
   password      String
-  role          Role      @default(INVESTOR)
+  role          String    @default("INVESTOR")
   walletAddress String?
   panels        Panel[]
+  investments   Investment[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
 
 model Panel {
-  id              String   @id @default(uuid())
-  name            String
-  location        String
-  capacity        Float
-  status          String   @default("active")
-  ownerId         String
-  owner           User     @relation(fields: [ownerId], references: [id])
-  blockchainTxHash String?
-  devices         IoTDevice[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                    String   @id @default(uuid())
+  name                  String
+  location              String
+  capacity              Float
+  status                String   @default("active")
+  ownerId               String
+  owner                 User     @relation(fields: [ownerId], references: [id])
+  blockchainTxHash      String?
+  blockchainPanelId     String?
+  blockchainTokenAddress String?
+  devices               IoTDevice[]
+  investments           Investment[]
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   @@map("panels")
 }
@@ -64,7 +68,18 @@ model IoTReading {
   updatedAt    DateTime   @updatedAt
 }
 
-enum Role {
-  OWNER
-  INVESTOR
-} 
+model Investment {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  panelId         String
+  panel           Panel    @relation(fields: [panelId], references: [id])
+  sharesPurchased Int
+  transactionHash String
+  tokenAddress    String
+  status          String   @default("PENDING") // PENDING, CONFIRMED, FAILED
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Enum removed - using String type instead 

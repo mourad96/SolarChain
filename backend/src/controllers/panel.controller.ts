@@ -3,8 +3,8 @@ import { ethers } from 'ethers';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { AssetRegistry__factory } from '../typechain-types';
-import { PrismaClient } from '@prisma/client';
 import { BlockchainService } from '../services/blockchain.service';
+import { prisma as prismaClient } from '../config/prisma';
 
 // Initialize blockchain connection
 let provider: ethers.JsonRpcProvider | undefined;
@@ -26,7 +26,6 @@ try {
   logger.error('Failed to initialize blockchain connection:', error);
 }
 
-const prismaClient = new PrismaClient();
 const blockchainService = new BlockchainService();
 
 export const registerPanel = async (req: Request, res: Response): Promise<void> => {
@@ -333,7 +332,7 @@ export const getAllOnChainPanels = async (_req: Request, res: Response): Promise
 export class PanelController {
   public async createPanel(req: Request, res: Response) {
     try {
-      const { name, location, capacity } = req.body;
+      const { name, location, capacity, tokenName, tokenSymbol, totalShares } = req.body;
       const userId = (req as any).user.id;
 
       // Get user's wallet address
@@ -358,22 +357,37 @@ export class PanelController {
       });
 
       try {
-        // Register panel on blockchain
-        const txHash = await blockchainService.registerPanelOnBlockchain(panel);
-        logger.info('Panel registered on blockchain:', { panelId: panel.id, txHash });
+        // Create panel with shares on blockchain
+        const blockchainResult = await blockchainService.createPanelWithShares(
+          panel,
+          tokenName || `${name} Token`,
+          tokenSymbol || name.slice(0, 3).toUpperCase(),
+          totalShares || 100
+        );
 
-        // Update panel with blockchain transaction hash
+        logger.info('Panel created with shares on blockchain:', { 
+          panelId: panel.id, 
+          blockchainPanelId: blockchainResult.panelId,
+          tokenAddress: blockchainResult.tokenAddress,
+          txHash: blockchainResult.txHash
+        });
+
+        // Update panel with blockchain information
         await prismaClient.panel.update({
           where: { id: panel.id },
           data: { 
-            blockchainTxHash: txHash 
+            blockchainTxHash: blockchainResult.txHash,
+            blockchainTokenAddress: blockchainResult.tokenAddress,
+            blockchainPanelId: blockchainResult.panelId
           } as any,
         });
 
         return res.status(201).json({ 
           panel,
-          blockchainTxHash: txHash,
-          message: 'Panel created and registered on blockchain successfully' 
+          blockchainTxHash: blockchainResult.txHash,
+          tokenAddress: blockchainResult.tokenAddress,
+          blockchainPanelId: blockchainResult.panelId,
+          message: 'Panel created and registered on blockchain successfully with shares' 
         });
       } catch (blockchainError) {
         logger.error('Failed to register panel on blockchain:', blockchainError);
@@ -440,6 +454,23 @@ export class PanelController {
         return res.status(400).json({ error: 'User has not connected a wallet' });
       }
 
+      // First, get all panels from the database that belong to this user
+      const userPanels = await prismaClient.panel.findMany({
+        where: { ownerId: userId },
+        select: {
+          id: true,
+          name: true,
+          location: true,
+          capacity: true,
+          status: true,
+          blockchainPanelId: true,
+          blockchainTxHash: true,
+          blockchainTokenAddress: true,
+          createdAt: true
+        }
+      });
+
+      // Attempt to get blockchain data, but if it fails, still return database panels
       try {
         // Get panels from blockchain
         const panelSerialNumbers = await blockchainService.getOwnerPanels(user.walletAddress);
@@ -450,7 +481,16 @@ export class PanelController {
             try {
               return await blockchainService.getPanelFromBlockchain(serialNumber);
             } catch (error) {
-              logger.error('Error fetching panel details:', { serialNumber, error });
+              // Provide more context in the error message
+              const errorMessage = error.message && error.message.includes('not found') 
+                ? `Panel exists in database but not on blockchain yet (${error.message})` 
+                : error.message || 'Unknown error';
+              
+              logger.warn('Error fetching panel details:', { 
+                serialNumber, 
+                errorMessage, 
+                fallback: 'Will use database panel information instead'
+              });
               return null;
             }
           })
@@ -459,19 +499,35 @@ export class PanelController {
         // Filter out any failed fetches
         const validPanels = panelDetails.filter(panel => panel !== null);
 
-        return res.json(validPanels);
+        if (validPanels.length > 0) {
+          return res.json(validPanels);
+        }
       } catch (blockchainError) {
         logger.error('Blockchain service error:', blockchainError);
         
-        if (blockchainError.message.includes('not properly initialized')) {
-          return res.status(503).json({ 
-            error: 'Blockchain service unavailable', 
-            message: 'The blockchain service is not properly configured. Please contact support.'
-          });
-        }
-        
-        throw blockchainError; // Re-throw to be caught by the outer catch block
+        // Don't return an error, continue to return database panels
       }
+
+      // If blockchain data retrieval fails, convert database panels to the expected format
+      const formattedPanels = userPanels.map((panel: any) => ({
+        id: panel.blockchainPanelId || 'N/A',
+        serialNumber: panel.id,
+        manufacturer: 'Unknown',
+        name: panel.name,
+        location: panel.location || 'Unknown',
+        capacity: panel.capacity,
+        owner: user.walletAddress || 'Unknown',
+        isActive: panel.status === 'active',
+        registrationDate: panel.createdAt,
+        tokenAddress: panel.blockchainTokenAddress || null,
+        blockchainStatus: panel.blockchainPanelId ? 'Registered' : 'Pending Registration',
+        message: panel.blockchainPanelId 
+          ? null 
+          : 'This panel has not yet been registered on the blockchain. It exists only in the local database. The blockchain registration process will happen in the background.',
+        isBlockchainRegistered: !!panel.blockchainPanelId
+      }));
+
+      return res.json(formattedPanels);
     } catch (error) {
       logger.error('Get blockchain panels error:', error);
       return res.status(500).json({ error: 'Failed to fetch blockchain panels' });
@@ -629,7 +685,7 @@ export class PanelController {
           
           // Update panels with blockchain transaction hash
           await Promise.all(
-            createdPanels.map(async (panel) => {
+            createdPanels.map(async (panel: any) => {
               await prismaClient.panel.update({
                 where: { id: panel.id },
                 data: { 
@@ -644,7 +700,7 @@ export class PanelController {
           
           // Clear blockchain transaction hash for failed registrations
           await Promise.all(
-            createdPanels.map(async (panel) => {
+            createdPanels.map(async (panel: any) => {
               await prismaClient.panel.update({
                 where: { id: panel.id },
                 data: { 
@@ -711,20 +767,24 @@ export class PanelController {
 
       // Get blockchain data for each panel if available
       const projectsWithBlockchainData = await Promise.all(
-        panels.map(async (panel) => {
+        panels.map(async (panel: any) => {
           let blockchainData = null;
           let progress = Math.floor(Math.random() * 100); // Default random progress for now
           let minInvestment = '$1,000'; // Default min investment
-          let expectedROI = '12%'; // Default ROI
+          let expectedROI = '12%';
+          let hasRealBlockchainData = false;
 
           try {
             // Get blockchain data using the BlockchainService
             const onChainPanel = await blockchainService.getPanelById(panel.id);
             if (onChainPanel) {
+              hasRealBlockchainData = !onChainPanel.isMockData;
+              
               blockchainData = {
                 tokenId: onChainPanel.tokenId.toString(),
                 totalSupply: onChainPanel.totalSupply,
                 availableSupply: onChainPanel.availableSupply,
+                isMockData: !!onChainPanel.isMockData
               };
               
               // Calculate progress based on available supply vs total supply
@@ -737,17 +797,24 @@ export class PanelController {
               // Calculate min investment based on token price
               const tokenPrice = await blockchainService.getTokenPrice(panel.id);
               if (tokenPrice) {
-                minInvestment = `$${(parseFloat(tokenPrice) * 10).toFixed(2)}`;
+                // Check if it's mock data (indicated by " (mock)" suffix)
+                if (tokenPrice.includes("(mock)")) {
+                  hasRealBlockchainData = false;
+                  minInvestment = `$${(parseFloat(tokenPrice.replace(" (mock)", "")) * 10).toFixed(2)}`;
+                } else {
+                  minInvestment = `$${(parseFloat(tokenPrice) * 10).toFixed(2)}`;
+                }
               }
               
               // Get expected ROI from blockchain or calculate based on historical data
               const estimatedROI = await blockchainService.getEstimatedROI(panel.id);
-              if (estimatedROI) {
+              if (estimatedROI !== null) {
                 expectedROI = `${estimatedROI}%`;
               }
             }
           } catch (error) {
             logger.error(`Failed to get blockchain data for panel ${panel.id}:`, error);
+            hasRealBlockchainData = false;
           }
 
           return {
@@ -761,6 +828,7 @@ export class PanelController {
             progress,
             blockchainData,
             createdAt: panel.createdAt,
+            isBlockchainVerified: hasRealBlockchainData
           };
         })
       );
@@ -769,6 +837,132 @@ export class PanelController {
     } catch (error) {
       logger.error('Error fetching projects for investors:', error);
       res.status(500).json({ error: 'Failed to fetch projects' });
+    }
+  }
+
+  public async investInProject(req: Request, res: Response) {
+    try {
+      const { panelId } = req.params;
+      const { shares } = req.body;
+      const userId = (req as any).user.id;
+
+      // Validate input
+      if (!shares || isNaN(Number(shares)) || Number(shares) <= 0) {
+        return res.status(400).json({ error: 'Invalid shares amount. Must be a positive number.' });
+      }
+
+      // Check if panel exists
+      const panel = await prismaClient.panel.findUnique({
+        where: { id: panelId },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          blockchainTokenAddress: true,
+        },
+      });
+
+      if (!panel) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      if (panel.status !== 'active') {
+        return res.status(400).json({ error: 'Cannot invest in inactive project' });
+      }
+
+      // Get user's wallet address
+      const user = await prismaClient.user.findUnique({
+        where: { id: userId },
+        select: { walletAddress: true }
+      });
+
+      if (!user?.walletAddress) {
+        return res.status(400).json({ error: 'You must connect a wallet to invest in projects' });
+      }
+
+      // Process investment through blockchain service
+      try {
+        const result = await blockchainService.investInProject(
+          panelId,
+          Number(shares),
+          user.walletAddress
+        );
+
+        // Record investment in database
+        const investment = await prismaClient.investment.create({
+          data: {
+            userId,
+            panelId,
+            sharesPurchased: Number(shares),
+            transactionHash: result.txHash,
+            status: 'CONFIRMED',
+            tokenAddress: result.tokenAddress,
+          },
+        });
+
+        return res.status(200).json({
+          message: 'Investment successful',
+          investment: {
+            id: investment.id,
+            panelId: investment.panelId,
+            sharesPurchased: investment.sharesPurchased,
+            transactionHash: investment.transactionHash,
+            status: investment.status,
+            createdAt: investment.createdAt,
+          },
+          blockchainDetails: {
+            txHash: result.txHash,
+            tokenAddress: result.tokenAddress,
+          },
+        });
+      } catch (blockchainError: any) {
+        // Handle blockchain errors
+        logger.error('Blockchain investment error:', blockchainError);
+        
+        let errorMessage = blockchainError.message || 'Unknown blockchain error';
+        let statusCode = 500;
+        
+        // Handle specific errors
+        if (errorMessage.includes('Insufficient shares available')) {
+          statusCode = 400;
+        } else if (errorMessage.includes('Cannot invest in mock project data')) {
+          statusCode = 400;
+        } else if (errorMessage.includes('Registry approval required')) {
+          statusCode = 503; // Service unavailable
+          errorMessage = 'Investment feature temporarily unavailable. Please try again later.';
+        }
+        
+        return res.status(statusCode).json({ error: errorMessage });
+      }
+    } catch (error) {
+      logger.error('Error processing investment:', error);
+      return res.status(500).json({ error: 'Failed to process investment. Please try again later.' });
+    }
+  }
+
+  public async getUserInvestments(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user.id;
+
+      const investments = await prismaClient.investment.findMany({
+        where: { userId },
+        include: {
+          panel: {
+            select: {
+              name: true,
+              location: true,
+              capacity: true,
+              blockchainTokenAddress: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      return res.json(investments);
+    } catch (error) {
+      logger.error('Error fetching user investments:', error);
+      return res.status(500).json({ error: 'Failed to fetch investments' });
     }
   }
 } 

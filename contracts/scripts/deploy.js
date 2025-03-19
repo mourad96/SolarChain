@@ -38,10 +38,9 @@ async function main() {
   // Deploy SolarPanelFactory (upgradeable)
   console.log("Deploying SolarPanelFactory...");
   const SolarPanelFactory = await ethers.getContractFactory("SolarPanelFactory");
-  const defaultSharesPerPanel = ethers.parseEther("1000"); // 1000 shares per panel
   const factory = await upgrades.deployProxy(
     SolarPanelFactory,
-    [registryAddress, defaultSharesPerPanel, minimumPanelCapacity],
+    [registryAddress],
     {
       initializer: "initialize",
       kind: "uups",
@@ -61,7 +60,14 @@ async function main() {
   // Deploy MockERC20 for dividend payments
   console.log("Deploying MockERC20 (USDC)...");
   const MockERC20 = await ethers.getContractFactory("MockERC20");
-  const paymentToken = await MockERC20.deploy("USD Coin", "USDC", overrides);
+  const paymentToken = await upgrades.deployProxy(
+    MockERC20,
+    ["USD Coin", "USDC"],
+    {
+      initializer: "initialize",
+      kind: "uups",
+    }
+  );
   await paymentToken.waitForDeployment();
   const paymentTokenAddress = await paymentToken.getAddress();
   console.log(`MockERC20 (USDC) deployed to: ${paymentTokenAddress}`);
@@ -74,7 +80,7 @@ async function main() {
     console.log(`Minted ${ethers.formatUnits(mintAmount, 18)} USDC to deployer`);
   }
 
-  // Deploy a test ShareToken (upgradeable)
+  // Deploy ShareToken (upgradeable)
   console.log("Deploying ShareToken...");
   const ShareToken = await ethers.getContractFactory("ShareToken");
   const shareToken = await upgrades.deployProxy(
@@ -131,6 +137,12 @@ async function main() {
   await grantPanelOwnerRoleTx.wait();
   console.log("PANEL_OWNER_ROLE granted to deployer in registry");
 
+  // Grant EMERGENCY_ROLE to the deployer in registry
+  const EMERGENCY_ROLE = await registry.EMERGENCY_ROLE();
+  const grantEmergencyRoleTx = await registry.grantRole(EMERGENCY_ROLE, deployer.address, overrides);
+  await grantEmergencyRoleTx.wait();
+  console.log("EMERGENCY_ROLE granted to deployer in registry");
+
   // Verify contracts on Etherscan if not on a local network
   if (network.name !== "hardhat" && network.name !== "localhost") {
     console.log("Waiting for block confirmations...");
@@ -163,13 +175,14 @@ async function main() {
     }
 
     try {
+      const paymentTokenImplementationAddress = await upgrades.erc1967.getImplementationAddress(paymentTokenAddress);
       await run("verify:verify", {
-        address: paymentTokenAddress,
-        constructorArguments: ["USD Coin", "USDC"],
+        address: paymentTokenImplementationAddress,
+        constructorArguments: [],
       });
-      console.log("MockERC20 verified");
+      console.log("MockERC20 implementation verified");
     } catch (error) {
-      console.log("Error verifying MockERC20:", error.message);
+      console.log("Error verifying MockERC20 implementation:", error.message);
     }
 
     try {
@@ -184,9 +197,9 @@ async function main() {
     }
 
     try {
-      const dividendDistributorImplementationAddress = await upgrades.erc1967.getImplementationAddress(dividendDistributorAddress);
+      const distributorImplementationAddress = await upgrades.erc1967.getImplementationAddress(dividendDistributorAddress);
       await run("verify:verify", {
-        address: dividendDistributorImplementationAddress,
+        address: distributorImplementationAddress,
         constructorArguments: [],
       });
       console.log("DividendDistributor implementation verified");

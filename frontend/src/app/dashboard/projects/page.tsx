@@ -19,7 +19,11 @@ interface Project {
     tokenId: string;
     totalSupply: string;
     availableSupply: string;
+    isMockData?: boolean;
   } | null;
+  isMockData?: boolean;
+  mockDataFields?: string[];
+  isBlockchainVerified?: boolean;
 }
 
 export default function ProjectsPage() {
@@ -47,7 +51,32 @@ export default function ProjectsPage() {
         }
 
         const data = await response.json();
-        setProjects(data);
+        
+        // Process the data to identify mock fields
+        const processedData = data.map((project: Project) => {
+          console.log('Processing project:', project);
+          
+          // Check if project has blockchain data
+          const hasRealBlockchainData = project.blockchainData && !project.blockchainData.isMockData;
+          
+          // If has real blockchain data, mark fields as real
+          if (hasRealBlockchainData) {
+            return {
+              ...project,
+              isMockData: false,
+              isBlockchainVerified: true
+            };
+          }
+          
+          // Otherwise, force all projects to show mock data indicator for debugging
+          return {
+            ...project,
+            isMockData: true,
+            mockDataFields: ['minimum investment', 'expected ROI', 'progress', 'owner'],
+          };
+        });
+        
+        setProjects(processedData);
       } catch (error) {
         console.error('Error fetching projects:', error);
         toast.error('Failed to load projects');
@@ -61,6 +90,8 @@ export default function ProjectsPage() {
             minInvestment: '$1,000',
             expectedROI: '15%',
             progress: 75,
+            isMockData: true,
+            mockDataFields: ['all data'],
           },
           {
             id: '2',
@@ -70,6 +101,8 @@ export default function ProjectsPage() {
             minInvestment: '$500',
             expectedROI: '12%',
             progress: 45,
+            isMockData: true,
+            mockDataFields: ['all data'],
           },
           {
             id: '3',
@@ -79,6 +112,8 @@ export default function ProjectsPage() {
             minInvestment: '$2,000',
             expectedROI: '18%',
             progress: 30,
+            isMockData: true,
+            mockDataFields: ['all data'],
           },
           {
             id: '4',
@@ -88,6 +123,8 @@ export default function ProjectsPage() {
             minInvestment: '$250',
             expectedROI: '10%',
             progress: 90,
+            isMockData: true,
+            mockDataFields: ['all data'],
           },
         ];
         setProjects(mockProjects);
@@ -135,23 +172,55 @@ export default function ProjectsPage() {
                     </div>
                     <div>
                       <p className="text-gray-500">Min. Investment</p>
-                      <p className="font-medium text-gray-900">{project.minInvestment}</p>
+                      <p className="font-medium text-gray-900">
+                        {project.minInvestment}
+                        {project.mockDataFields?.includes('minimum investment') && (
+                          <span className="ml-1 text-xs font-bold bg-amber-100 text-amber-800 px-1 py-0.5 rounded">(mock)</span>
+                        )}
+                      </p>
                     </div>
                     <div>
                       <p className="text-gray-500">Expected ROI</p>
-                      <p className="font-medium text-green-600">{project.expectedROI}</p>
+                      <p className="font-medium text-green-600">
+                        {project.expectedROI}
+                        {project.mockDataFields?.includes('expected ROI') && (
+                          <span className="ml-1 text-xs font-bold bg-amber-100 text-amber-800 px-1 py-0.5 rounded">(mock)</span>
+                        )}
+                      </p>
                     </div>
                     {project.owner && (
                       <div>
                         <p className="text-gray-500">Owner</p>
-                        <p className="font-medium text-gray-900">{project.owner}</p>
+                        <p className="font-medium text-gray-900">
+                          {project.owner}
+                          {project.mockDataFields?.includes('owner') && (
+                            <span className="ml-1 text-xs font-bold bg-amber-100 text-amber-800 px-1 py-0.5 rounded">(mock)</span>
+                          )}
+                        </p>
                       </div>
                     )}
+                    {/* Show either mock data warning or blockchain verified badge */}
+                    <div className="col-span-2 mt-2">
+                      {project.isBlockchainVerified ? (
+                        <p className="text-sm bg-green-100 text-green-800 p-2 rounded-md font-medium">
+                          ✓ Blockchain verified data
+                        </p>
+                      ) : (
+                        <p className="text-sm bg-red-100 text-red-800 p-2 rounded-md font-bold">
+                          ⚠️ MOCK DATA INDICATOR - This should be visible
+                        </p>
+                      )}
+                    </div>
                   </div>
                   <div className="mt-4">
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-gray-500">Funding Progress</span>
-                      <span className="font-medium text-gray-900">{project.progress}%</span>
+                      <span className="font-medium text-gray-900">
+                        {project.progress}%
+                        {project.mockDataFields?.includes('progress') && (
+                          <span className="ml-1 text-xs font-bold bg-amber-100 text-amber-800 px-1 py-0.5 rounded">(mock)</span>
+                        )}
+                      </span>
                     </div>
                     <div className="mt-2 overflow-hidden rounded-full bg-gray-200">
                       <div

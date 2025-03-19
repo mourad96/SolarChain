@@ -61,6 +61,9 @@ export default function PanelsPage() {
     name: '',
     location: '',
     capacity: 0,
+    tokenName: '',
+    tokenSymbol: '',
+    totalShares: 100,
   });
   const [error, setError] = useState<string | null>(null);
   const [showBlockchainDetails, setShowBlockchainDetails] = useState(false);
@@ -252,9 +255,17 @@ export default function PanelsPage() {
         throw new Error(errorData.message || 'Failed to add panel');
       }
 
-      toast.success('Solar panel added successfully and registered on blockchain');
+      const responseData = await response.json();
+      toast.success('Solar panel added successfully with shares created on blockchain');
       setIsAddingPanel(false);
-      setNewPanel({ name: '', location: '', capacity: 0 });
+      setNewPanel({ 
+        name: '', 
+        location: '', 
+        capacity: 0, 
+        tokenName: '', 
+        tokenSymbol: '', 
+        totalShares: 100 
+      });
       await fetchPanels();
     } catch (error) {
       console.error('Error adding panel:', error);
@@ -573,6 +584,59 @@ export default function PanelsPage() {
                     min="0"
                     required
                   />
+                </div>
+                <div className="pt-4 border-t border-gray-200">
+                  <h4 className="font-medium text-sm text-gray-700 mb-2">Blockchain Token Details</h4>
+                  <div>
+                    <label htmlFor="tokenName" className="block text-sm font-medium text-gray-700">
+                      Token Name
+                    </label>
+                    <input
+                      type="text"
+                      id="tokenName"
+                      value={newPanel.tokenName}
+                      onChange={(e) => setNewPanel({ ...newPanel, tokenName: e.target.value })}
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                      placeholder={`${newPanel.name || 'Panel'} Token`}
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Defaults to "{newPanel.name || 'Panel'} Token" if left empty
+                    </p>
+                  </div>
+                  <div className="mt-3">
+                    <label htmlFor="tokenSymbol" className="block text-sm font-medium text-gray-700">
+                      Token Symbol
+                    </label>
+                    <input
+                      type="text"
+                      id="tokenSymbol"
+                      value={newPanel.tokenSymbol}
+                      onChange={(e) => setNewPanel({ ...newPanel, tokenSymbol: e.target.value.toUpperCase() })}
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                      placeholder={newPanel.name ? newPanel.name.slice(0, 3).toUpperCase() : 'SPT'}
+                      maxLength={6}
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Defaults to first 3 letters of panel name if left empty
+                    </p>
+                  </div>
+                  <div className="mt-3">
+                    <label htmlFor="totalShares" className="block text-sm font-medium text-gray-700">
+                      Total Shares
+                    </label>
+                    <input
+                      type="number"
+                      id="totalShares"
+                      value={newPanel.totalShares}
+                      onChange={(e) => setNewPanel({ ...newPanel, totalShares: Number(e.target.value) })}
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                      min="1"
+                      required
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Number of shares to create for this panel (default: 100)
+                    </p>
+                  </div>
                 </div>
                 <div className="bg-yellow-50 p-3 rounded-md">
                   <p className="text-sm text-yellow-700">

@@ -101,12 +101,14 @@ MIT
 
 ## Deployed Contracts (Amoy Testnet)
 
-| Contract | Address |
-|----------|---------|
-| SolarPanelRegistry | [0x9d830BDfF945791134bc62F69e2ad6111Fb9856A](https://amoy.polygonscan.com/address/0x9d830BDfF945791134bc62F69e2ad6111Fb9856A) |
-| SolarPanelFactory | [0x3E2A78154867Cd41D24319c507e6E11014C7Cbe2](https://amoy.polygonscan.com/address/0x3E2A78154867Cd41D24319c507e6E11014C7Cbe2) |
-| ShareToken | [0x974624CEC8a9AB793baDB767d32025C39C6Acd78](https://amoy.polygonscan.com/address/0x974624CEC8a9AB793baDB767d32025C39C6Acd78) |
-| DividendDistributor | [0x626088F5255A9cF99C0b00a88E2D06AD3911f4D7](https://amoy.polygonscan.com/address/0x626088F5255A9cF99C0b00a88E2D06AD3911f4D7) |
-| MockERC20 (USDC) | [0x35c18a8F5Abb163aee1b2cB8087aaC5C7069b3a5](https://amoy.polygonscan.com/address/0x35c18a8F5Abb163aee1b2cB8087aaC5C7069b3a5) |
+| Contract | Address | Implementation |
+|----------|---------|----------------|
+| SolarPanelRegistry | [0x8ed1f4a51Da65eeE69C485630C82c612DfF76D64](https://amoy.polygonscan.com/address/0x8ed1f4a51Da65eeE69C485630C82c612DfF76D64) | [View](https://amoy.polygonscan.com/address/0xF8AFf87CEEA1025359752931B55134CEc793a5d5) |
+| SolarPanelFactory | [0x0226575805F212062812CBeB87B522602261F868](https://amoy.polygonscan.com/address/0x0226575805F212062812CBeB87B522602261F868) | [View](https://amoy.polygonscan.com/address/0x7B04b56E92F79076EDB336fE73CE5D0A7A26EbdC) |
+| ShareToken | [0xA26A20bD47ea07a56Ad8Ab3D35DBd9f1b51c8E4E](https://amoy.polygonscan.com/address/0xA26A20bD47ea07a56Ad8Ab3D35DBd9f1b51c8E4E) | [View](https://amoy.polygonscan.com/address/0x8805756688A997AC8eD3439394fb17B989f229B5) |
+| DividendDistributor | [0x98B5f53AB2C14d2E1Fa2C6004805058C09EB8189](https://amoy.polygonscan.com/address/0x98B5f53AB2C14d2E1Fa2C6004805058C09EB8189) | [View](https://amoy.polygonscan.com/address/0xC6538A1175Ae559475F8ECeA9225BF14E0e49774) |
+| MockERC20 (USDC) | [0xe3Ee77DAAa2214fFEE5f9B04DEB9F3126003a9be](https://amoy.polygonscan.com/address/0xe3Ee77DAAa2214fFEE5f9B04DEB9F3126003a9be) | N/A |
 
-Last deployed: 2025-03-15T02:14:22.901Z
+> Note: These contracts are upgradeable using the UUPS proxy pattern. The proxy address is the address you interact with, while the implementation address contains the actual logic.
+
+Last deployed: 2025-03-17T14:52:12.698Z
