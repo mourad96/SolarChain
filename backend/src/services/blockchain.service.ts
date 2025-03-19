@@ -736,7 +736,7 @@ export class BlockchainService {
       // Load ShareToken ABI
       const ShareTokenABI = loadContractABI('ShareToken');
       
-      // Create contract instance
+      // Create contract instance for the share token
       const shareTokenContract = new ethers.Contract(
         panel.shareTokenAddress,
         ShareTokenABI,
@@ -751,65 +751,173 @@ export class BlockchainService {
         throw new Error(`Insufficient shares available. Requested: ${amount}, Available: ${registryBalance.toString()}`);
       }
       
-      // Sign transaction with admin wallet to transfer tokens to the investor
+      // Load USDC contract (MockERC20) address from environment
+      const usdcAddress = process.env.MOCK_ERC20_ADDRESS;
+      if (!usdcAddress) {
+        throw new Error('Missing USDC token address configuration');
+      }
+      
+      // Load MockERC20 ABI
+      const MockERC20ABI = loadContractABI('MockERC20');
+      
+      // Create contract instance for the USDC token
+      const usdcContract = new ethers.Contract(
+        usdcAddress,
+        MockERC20ABI,
+        this.provider
+      );
+      
+      // Get price per token from panel data (or pricing method)
+      const priceString = await this.getTokenPrice(panelId);
+      if (!priceString) {
+        throw new Error('Failed to get token price');
+      }
+      
+      // Convert price from USD to token units (assuming 18 decimals for USDC)
+      const price = parseFloat(priceString.replace(' (mock)', ''));
+      const totalCost = price * amount;
+      const totalCostInWei = ethers.parseUnits(totalCost.toFixed(6), 18);
+      
+      logger.info('Investment transaction details:', {
+        panelId,
+        amount,
+        investorAddress,
+        pricePerToken: price,
+        totalCost,
+        tokenAddress: panel.shareTokenAddress
+      });
+      
+      // 1. Investor needs to approve the registry to spend their USDC
+      // This would typically be done in the frontend before calling this method
+      // We'll check if the required allowance is already present
+      const currentAllowance = await usdcContract.allowance(investorAddress, this.registryContract!.target);
+      
+      if (currentAllowance < totalCostInWei) {
+        logger.warn('Insufficient USDC allowance for purchase', {
+          currentAllowance: currentAllowance.toString(),
+          required: totalCostInWei.toString()
+        });
+        throw new Error('Investor must approve USDC spending first. Please approve the required amount in your wallet.');
+      }
+      
+      // 2. Execute the purchase on behalf of the investor
+      // This requires a function in the registry contract that handles the payment and token transfer
       const privateKey = process.env.PRIVATE_KEY;
       if (!privateKey) {
         throw new Error('Missing private key for blockchain transactions');
       }
       
       const wallet = new ethers.Wallet(privateKey, this.provider);
-      const contractWithSigner = shareTokenContract.connect(wallet);
+      const registryWithSigner = this.registryContract!.connect(wallet);
       
-      logger.info('Initiating investment transaction:', { 
-        panelId,
+      // Assuming we have a purchaseShares function in the registry contract
+      // that takes payment in USDC and transfers share tokens
+      logger.info('Executing share purchase transaction:', {
+        panelId: blockchainPanelId,
+        shareTokenAddress: panel.shareTokenAddress,
         amount,
-        investorAddress,
-        tokenAddress: panel.shareTokenAddress
+        investor: investorAddress,
+        cost: totalCostInWei.toString()
       });
       
-      // First check if we are approved to transfer
-      const registryAddress = this.registryContract!.target;
-      const allowance = await shareTokenContract.allowance(registryAddress, wallet.address);
-      
-      // If not approved, approve first
-      if (allowance < BigInt(amount)) {
+      // Call the purchaseShares function on the registry
+      // If this function doesn't exist, it should be added to the smart contract
+      try {
+        const tx = await (registryWithSigner as any).purchaseShares(
+          blockchainPanelId,
+          amount,
+          investorAddress,
+          totalCostInWei
+        );
+        
+        logger.info('Purchase transaction submitted:', {
+          txHash: tx.hash,
+          amount,
+          investor: investorAddress
+        });
+        
+        // Wait for transaction to complete
+        const receipt = await tx.wait();
+        
+        logger.info('Purchase transaction confirmed:', {
+          txHash: receipt.hash,
+          blockNumber: receipt.blockNumber,
+          amount,
+          investor: investorAddress
+        });
+        
+        return {
+          txHash: receipt.hash,
+          sharesPurchased: amount,
+          tokenAddress: panel.shareTokenAddress
+        };
+      } catch (purchaseError) {
+        logger.error('Error in purchase transaction:', purchaseError);
+        
+        // Fallback implementation if purchaseShares doesn't exist in the registry
+        // This is a simplified two-step process that should be replaced with a proper
+        // atomic transaction in the smart contract for security
+        
+        logger.info('Attempting fallback implementation for purchase...');
+        
+        // 1. Transfer USDC from investor to registry
+        const usdcWithSigner = usdcContract.connect(wallet);
+        
+        // We need the investor to have already called transferFrom in their client
+        // to allow the registry to move their tokens
         try {
-          // Only the registry can approve, and we may not have control over it
-          // This is a simplified approach, in a real system the registry contract would have
-          // a separate function for this operation
-          throw new Error('Registry approval required for token transfer');
-        } catch (approvalError) {
-          logger.error('Failed to get approval for token transfer:', approvalError);
-          throw new Error('Cannot transfer tokens without registry approval');
+          // Execute transferFrom to move USDC from investor to registry
+          const transferTx = await (usdcWithSigner as any).transferFrom(
+            investorAddress,
+            this.registryContract!.target,
+            totalCostInWei
+          );
+          
+          logger.info('USDC transfer transaction submitted:', {
+            txHash: transferTx.hash,
+            amount: totalCostInWei.toString(),
+            from: investorAddress,
+            to: this.registryContract!.target
+          });
+          
+          // Wait for the transfer to complete
+          await transferTx.wait();
+          
+          // 2. Transfer share tokens from registry to investor
+          // The registry should be authorized to transfer tokens
+          // This assumes the registry holds the tokens and we have authority to transfer from it
+          const shareTx = await (registryWithSigner as any).transferShares(
+            panel.shareTokenAddress,
+            investorAddress,
+            amount
+          );
+          
+          logger.info('Share token transfer transaction submitted:', {
+            txHash: shareTx.hash,
+            amount,
+            to: investorAddress
+          });
+          
+          // Wait for the token transfer to complete
+          const shareReceipt = await shareTx.wait();
+          
+          logger.info('Purchase completed (fallback implementation):', {
+            txHash: shareReceipt.hash,
+            blockNumber: shareReceipt.blockNumber,
+            sharesPurchased: amount,
+            usdcPaid: ethers.formatUnits(totalCostInWei, 18)
+          });
+          
+          return {
+            txHash: shareReceipt.hash,
+            sharesPurchased: amount,
+            tokenAddress: panel.shareTokenAddress
+          };
+        } catch (fallbackError) {
+          logger.error('Fallback implementation failed:', fallbackError);
+          throw new Error(`Purchase transaction failed: ${fallbackError.message}`);
         }
       }
-      
-      // Transfer tokens directly
-      // In a real implementation, this would usually be a purchase operation
-      // where the investor sends payment and receives tokens
-      const tx = await (contractWithSigner as any).transfer(investorAddress, amount);
-      
-      logger.info('Investment transaction submitted:', { 
-        txHash: tx.hash,
-        amount,
-        investor: investorAddress
-      });
-      
-      // Wait for transaction to complete
-      const receipt = await tx.wait();
-      
-      logger.info('Investment transaction confirmed:', { 
-        txHash: receipt.hash,
-        blockNumber: receipt.blockNumber,
-        amount,
-        investor: investorAddress
-      });
-      
-      return {
-        txHash: receipt.hash,
-        sharesPurchased: amount,
-        tokenAddress: panel.shareTokenAddress
-      };
     } catch (error) {
       logger.error('Error investing in project:', error);
       throw new Error(`Failed to invest in project: ${error.message}`);
