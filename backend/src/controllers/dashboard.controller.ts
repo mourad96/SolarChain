@@ -2,6 +2,10 @@ import { Response } from 'express';
 import { prisma } from '../config/prisma';
 import { AuthenticatedRequest } from '../types/auth';
 import { IoTReading } from '@prisma/client';
+import { ethers } from 'ethers';
+import { config } from '../config';
+import { DividendDistributor__factory } from '../typechain-types';
+import { logger } from '../utils/logger';
 
 interface PanelWithName {
   id: string;
@@ -15,6 +19,25 @@ interface ReadingWithPanelName extends Pick<IoTReading, 'id' | 'energyOutput' | 
       name: string;
     };
   };
+}
+
+// Initialize blockchain connection
+let provider: ethers.JsonRpcProvider | undefined;
+let dividendDistributor: ReturnType<typeof DividendDistributor__factory.connect> | undefined;
+
+try {
+  if (config.blockchain.rpcUrl && config.blockchain.privateKey && config.blockchain.contracts.dividendDistributor) {
+    provider = new ethers.JsonRpcProvider(config.blockchain.rpcUrl);
+    const wallet = new ethers.Wallet(config.blockchain.privateKey, provider);
+    dividendDistributor = DividendDistributor__factory.connect(
+      config.blockchain.contracts.dividendDistributor,
+      wallet
+    );
+  } else {
+    logger.warn('Missing blockchain configuration. Some dividend features will be disabled.');
+  }
+} catch (error) {
+  logger.error('Failed to initialize blockchain connection:', error);
 }
 
 export const getDashboardStats = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -48,15 +71,53 @@ export const getDashboardStats = async (req: AuthenticatedRequest, res: Response
       },
     });
 
-    // Get total tokens (this would be integrated with your blockchain logic)
-    // For now, returning a placeholder
-    const totalTokens = 0;
+    // Get user wallet address
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { walletAddress: true },
+    });
+
+    // Get user investments (tokens)
+    const investments = await prisma.investment.count({
+      where: { userId },
+    });
+
+    // Get panels with blockchain IDs
+    const userPanels = await prisma.panel.findMany({
+      where: { ownerId: userId },
+      select: { 
+        id: true, 
+        blockchainPanelId: true,
+      },
+    });
+
+    let totalUnclaimedDividends = 0;
+
+    // If user has wallet and we have contract connection, get dividend data
+    if (user?.walletAddress && dividendDistributor) {
+      try {
+        // Calculate total unclaimed dividends for all panels
+        for (const panel of userPanels) {
+          if (panel.blockchainPanelId) {
+            // Get unclaimed dividends
+            const unclaimed = await dividendDistributor.getUnclaimedDividends(
+              panel.blockchainPanelId,
+              user.walletAddress
+            );
+            totalUnclaimedDividends += parseFloat(ethers.formatUnits(unclaimed, 6)); // USDC has 6 decimals
+          }
+        }
+      } catch (error) {
+        logger.error('Error fetching dividend data:', error);
+      }
+    }
 
     res.json({
       totalPanels,
-      totalTokens,
+      totalTokens: investments,
       totalEnergyGenerated: totalEnergyGenerated._sum.energyOutput || 0,
       activeDevices,
+      totalUnclaimedDividends,
     });
   } catch (error) {
     console.error('Error fetching dashboard stats:', error);
@@ -107,6 +168,23 @@ export const getDashboardActivity = async (req: AuthenticatedRequest, res: Respo
       },
     });
 
+    // Get recent investments/token activities
+    const recentInvestments = await prisma.investment.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      select: {
+        id: true,
+        sharesPurchased: true,
+        createdAt: true,
+        panel: {
+          select: {
+            name: true,
+          },
+        },
+      },
+    });
+
     // Combine and format activities
     const activities = [
       ...recentPanels.map((panel: PanelWithName) => ({
@@ -120,6 +198,12 @@ export const getDashboardActivity = async (req: AuthenticatedRequest, res: Respo
         type: 'iot_data' as const,
         description: `Energy production: ${reading.energyOutput.toFixed(2)}kWh from ${reading.device.panel.name}`,
         timestamp: reading.timestamp.toISOString(),
+      })),
+      ...recentInvestments.map((investment) => ({
+        id: `investment-${investment.id}`,
+        type: 'investment' as const,
+        description: `Purchased ${investment.sharesPurchased} shares of ${investment.panel.name}`,
+        timestamp: investment.createdAt.toISOString(),
       })),
     ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
      .slice(0, 10);

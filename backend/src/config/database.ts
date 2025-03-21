@@ -12,7 +12,7 @@ export const AppDataSource = new DataSource({
   username: config.database.username,
   password: config.database.password,
   database: config.database.database,
-  synchronize: config.database.synchronize,
+  synchronize: false,
   logging: config.database.logging,
   entities: [User, SolarPanel, IoTData, ShareToken],
   migrations: ['src/migrations/*.ts'],

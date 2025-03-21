@@ -7,12 +7,16 @@ const protectedPaths = [
   '/dashboard',
   '/dashboard/owner',
   '/dashboard/investor',
+  '/dashboard/tokens',
   '/profile',
 ];
 
 // Define paths that require specific roles
 const ownerPaths = ['/dashboard/owner'];
 const investorPaths = ['/dashboard/investor'];
+
+// Define common paths that can be accessed by both roles
+const commonPaths = ['/dashboard/tokens'];
 
 // Define paths that are public
 const publicPaths = [
@@ -28,6 +32,7 @@ export function middleware(request: NextRequest) {
   // Check if the path is protected
   const isProtectedPath = protectedPaths.some(path => pathname.startsWith(path));
   const isAuthPath = pathname.startsWith('/auth/');
+  const isCommonPath = commonPaths.some(path => pathname.startsWith(path));
   
   // Enhanced redirect loop detection
   const referer = request.headers.get('referer');
@@ -102,23 +107,25 @@ export function middleware(request: NextRequest) {
       }
       
       // Check if user is trying to access a role-specific path they don't have access to
-      const isOwnerPath = ownerPaths.some(path => pathname.startsWith(path));
-      const isInvestorPath = investorPaths.some(path => pathname.startsWith(path));
-      
-      if (isOwnerPath && userRole !== 'owner') {
-        // Redirect investor trying to access owner pages
-        const response = NextResponse.redirect(new URL('/dashboard/investor', request.url));
-        response.cookies.set('redirect_count', newRedirectCount.toString());
-        response.cookies.set('redirect_timestamp', newTimestamp);
-        return response;
-      }
-      
-      if (isInvestorPath && userRole !== 'investor') {
-        // Redirect owner trying to access investor pages
-        const response = NextResponse.redirect(new URL('/dashboard/owner', request.url));
-        response.cookies.set('redirect_count', newRedirectCount.toString());
-        response.cookies.set('redirect_timestamp', newTimestamp);
-        return response;
+      if (!isCommonPath) {
+        const isOwnerPath = ownerPaths.some(path => pathname.startsWith(path));
+        const isInvestorPath = investorPaths.some(path => pathname.startsWith(path));
+        
+        if (isOwnerPath && userRole !== 'owner') {
+          // Redirect investor trying to access owner pages
+          const response = NextResponse.redirect(new URL('/dashboard/investor', request.url));
+          response.cookies.set('redirect_count', newRedirectCount.toString());
+          response.cookies.set('redirect_timestamp', newTimestamp);
+          return response;
+        }
+        
+        if (isInvestorPath && userRole !== 'investor') {
+          // Redirect owner trying to access investor pages
+          const response = NextResponse.redirect(new URL('/dashboard/owner', request.url));
+          response.cookies.set('redirect_count', newRedirectCount.toString());
+          response.cookies.set('redirect_timestamp', newTimestamp);
+          return response;
+        }
       }
       
       // If it's the root dashboard path, redirect to the role-specific dashboard

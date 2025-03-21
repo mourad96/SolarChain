@@ -2,8 +2,7 @@ import 'dotenv/config'; // Load environment variables first
 import express from 'express';
 import cors from 'cors';
 import { router } from './routes';
-import { PrismaClient } from '@prisma/client';
-import { AppDataSource } from './config/database';
+import { prisma } from './services/prisma.service'; 
 import { logger } from './utils/logger';
 
 // Validate required environment variables
@@ -21,20 +20,15 @@ if (missingEnvVars.length > 0) {
 }
 
 const app = express();
-const prisma = new PrismaClient();
-
-// Initialize TypeORM connection
-AppDataSource.initialize()
-  .then(() => {
-    logger.info('TypeORM Data Source has been initialized!');
-  })
-  .catch((error) => {
-    logger.error('Error during TypeORM Data Source initialization:', error);
-    process.exit(1);
-  });
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  exposedHeaders: ['Authorization']
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -58,9 +52,6 @@ app.listen(PORT, () => {
 
 // Handle graceful shutdown
 process.on('SIGTERM', async () => {
-  await Promise.all([
-    prisma.$disconnect(),
-    AppDataSource.destroy()
-  ]);
+  await prisma.$disconnect();
   process.exit(0);
 }); 

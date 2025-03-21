@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,75 +8,104 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(uuid())
-  email         String    @unique
+  id            String             @id @default(uuid())
+  email         String             @unique
   name          String
   password      String
-  role          String    @default("INVESTOR")
+  role          String             @default("INVESTOR")
   walletAddress String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
   panels        Panel[]
+  tokenHoldings ShareTokenHolder[]
   investments   Investment[]
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
 }
 
 model Panel {
-  id                    String   @id @default(uuid())
-  name                  String
-  location              String
-  capacity              Float
-  status                String   @default("active")
-  ownerId               String
-  owner                 User     @relation(fields: [ownerId], references: [id])
-  blockchainTxHash      String?
-  blockchainPanelId     String?
+  id                     String       @id @default(uuid())
+  name                   String
+  location               String
+  capacity               Float
+  status                 String       @default("active")
+  ownerId                String
+  blockchainTxHash       String?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  blockchainPanelId      String?
   blockchainTokenAddress String?
-  devices               IoTDevice[]
-  investments           Investment[]
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  devices                IoTDevice[]
+  owner                  User         @relation(fields: [ownerId], references: [id])
+  tokens                 ShareToken[]
+  investments            Investment[]
 
   @@map("panels")
+}
+
+model ShareToken {
+  id             String             @id @default(uuid())
+  panelId        String
+  totalShares    Int
+  onChainTokenId String
+  holderBalances Json               @default("{}")
+  isActive       Boolean            @default(true)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  holders        ShareTokenHolder[]
+  panel          Panel              @relation(fields: [panelId], references: [id])
+
+  @@map("share_tokens")
+}
+
+model ShareTokenHolder {
+  id          String     @id @default(uuid())
+  userId      String
+  tokenId     String
+  shareAmount Int
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  token       ShareToken @relation(fields: [tokenId], references: [id])
+  user        User       @relation(fields: [userId], references: [id])
+
+  @@unique([userId, tokenId])
+  @@map("share_token_holders")
 }
 
 model IoTDevice {
   id           String       @id @default(uuid())
   deviceType   String
-  serialNumber String      @unique
-  status       String      @default("offline")
-  panel        Panel       @relation(fields: [panelId], references: [id])
+  serialNumber String       @unique
+  status       String       @default("offline")
   panelId      String
-  readings     IoTReading[]
   lastUpdate   DateTime?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  panel        Panel        @relation(fields: [panelId], references: [id])
+  readings     IoTReading[]
 }
 
 model IoTReading {
-  id           String     @id @default(uuid())
-  device       IoTDevice  @relation(fields: [deviceId], references: [id])
+  id           String    @id @default(uuid())
   deviceId     String
   energyOutput Float
   temperature  Float
   voltage      Float
   current      Float
-  timestamp    DateTime   @default(now())
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  timestamp    DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  device       IoTDevice @relation(fields: [deviceId], references: [id])
 }
 
 model Investment {
   id              String   @id @default(uuid())
   userId          String
-  user            User     @relation(fields: [userId], references: [id])
   panelId         String
-  panel           Panel    @relation(fields: [panelId], references: [id])
   sharesPurchased Int
   transactionHash String
   tokenAddress    String
-  status          String   @default("PENDING") // PENDING, CONFIRMED, FAILED
+  status          String   @default("PENDING")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  panel           Panel    @relation(fields: [panelId], references: [id])
+  user            User     @relation(fields: [userId], references: [id])
 }
-
-// Enum removed - using String type instead 

@@ -1,12 +1,15 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { body } from 'express-validator';
+import { body, param } from 'express-validator';
 import {
   mintTokens,
   transferTokens,
   getTokenDetails,
   listTokens,
   getUserTokens,
-  getTokenHolders
+  getTokenHolders,
+  distributeDividends,
+  claimDividends,
+  getUnclaimedDividends
 } from '../controllers/token.controller';
 import { validateRequest } from '../middleware/validate-request';
 import { requireAuth } from '../middleware/auth.middleware';
@@ -102,5 +105,61 @@ router.get('/:id/history', requireAuth, async (req: Request, res: Response, next
     next(error);
   }
 });
+
+// Distribute dividends
+router.post(
+  '/distribute-dividends',
+  requireAuth,
+  [
+    body('panelId').trim().notEmpty().withMessage('Panel ID is required'),
+    body('amount')
+      .isNumeric()
+      .withMessage('Amount must be a number')
+      .custom((value) => parseFloat(value) > 0)
+      .withMessage('Amount must be greater than 0'),
+  ],
+  validateRequest,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      await distributeDividends(req, res);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// Claim dividends
+router.post(
+  '/claim-dividends',
+  requireAuth,
+  [
+    body('panelId').trim().notEmpty().withMessage('Panel ID is required'),
+  ],
+  validateRequest,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      await claimDividends(req, res);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// Get unclaimed dividends
+router.get(
+  '/panel/:panelId/unclaimed-dividends',
+  requireAuth,
+  [
+    param('panelId').trim().notEmpty().withMessage('Panel ID is required'),
+  ],
+  validateRequest,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      await getUnclaimedDividends(req, res);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 export { router as tokenRouter }; 
