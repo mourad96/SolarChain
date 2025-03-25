@@ -29,7 +29,8 @@ contract SolarPanelRegistry is
         bool isActive;           // Active status
         uint256 registrationDate; // When the panel was registered
         address shareTokenAddress; // Address of the associated share token
-        uint256 minimumCapacity;  // Minimum capacity required (for validation)
+        address saleContractAddress; // Address of the associated sale contract
+        uint256 capacity;        // Panel's capacity
     }
 
     // Mapping from panel ID to Panel struct
@@ -40,19 +41,21 @@ contract SolarPanelRegistry is
     mapping(address => uint256[]) public ownerPanels;
     // Mapping from share token address to panel ID
     mapping(address => uint256) public tokenToPanelId;
+    // Mapping from sale contract address to panel ID
+    mapping(address => uint256) public saleToPanelId;
     
     uint256 private _nextPanelId;
-    uint256 public minimumPanelCapacity; // Global minimum capacity requirement
 
     event PanelRegistered(
         uint256 indexed panelId,
         string externalId,
         address owner,
-        address shareTokenAddress
+        address shareTokenAddress,
+        uint256 capacity
     );
     event PanelStatusChanged(uint256 indexed panelId, bool isActive);
     event ShareTokenLinked(uint256 indexed panelId, address indexed tokenAddress);
-    event MinimumCapacityUpdated(uint256 newMinimumCapacity);
+    event SaleContractLinked(uint256 indexed panelId, address indexed saleAddress);
     event EmergencyAction(string action, address indexed triggeredBy);
     event ExternalDataUpdated(uint256 indexed panelId, string externalId);
 
@@ -82,7 +85,7 @@ contract SolarPanelRegistry is
     /**
      * @dev Initializes the contract replacing the constructor for upgradeable contracts
      */
-    function initialize(uint256 _minimumPanelCapacity) public initializer {
+    function initialize() public initializer {
         __AccessControl_init();
         __Pausable_init();
         __UUPSUpgradeable_init();
@@ -93,22 +96,12 @@ contract SolarPanelRegistry is
         _grantRole(EMERGENCY_ROLE, msg.sender);
         
         _nextPanelId = 1;
-        minimumPanelCapacity = _minimumPanelCapacity;
     }
 
     /**
      * @dev Required by the UUPSUpgradeable module
      */
     function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
-
-    /**
-     * @dev Sets the minimum capacity required for panel registration
-     * @param _minimumCapacity The new minimum capacity
-     */
-    function setMinimumPanelCapacity(uint256 _minimumCapacity) external onlyRole(ADMIN_ROLE) {
-        minimumPanelCapacity = _minimumCapacity;
-        emit MinimumCapacityUpdated(_minimumCapacity);
-    }
 
     /**
      * @dev Links a share token to a panel
@@ -132,20 +125,41 @@ contract SolarPanelRegistry is
     }
 
     /**
+     * @dev Links a sale contract to a panel
+     * @param panelId The ID of the panel
+     * @param saleAddress The address of the sale contract
+     */
+    function linkSaleContract(uint256 panelId, address saleAddress) 
+        external 
+        whenNotPaused 
+        onlyFactoryOrAdmin 
+    {
+        require(panels[panelId].owner != address(0), "Panel does not exist");
+        require(saleAddress != address(0), "Invalid sale contract address");
+        require(panels[panelId].shareTokenAddress != address(0), "Panel must have a token first");
+        require(saleToPanelId[saleAddress] == 0, "Sale contract already linked to a panel");
+        
+        panels[panelId].saleContractAddress = saleAddress;
+        saleToPanelId[saleAddress] = panelId;
+        
+        emit SaleContractLinked(panelId, saleAddress);
+    }
+
+    /**
      * @dev Registers a new panel with minimal on-chain data
      * @param _externalId The external ID linking to off-chain metadata
-     * @param _minimumCapacity The minimum capacity for this panel (for validation)
+     * @param _capacity The capacity of this panel
      * @param _owner The owner of the panel
      * @return panelId The ID of the registered panel
      */
     function registerPanelByFactory(
         string memory _externalId,
-        uint256 _minimumCapacity,
+        uint256 _capacity,
         address _owner
     ) public whenNotPaused onlyFactoryOrAdmin returns (uint256) {
         // Enhanced validation
         require(bytes(_externalId).length > 0, "External ID cannot be empty");
-        require(_minimumCapacity >= minimumPanelCapacity, "Capacity below minimum requirement");
+        require(_capacity > 0, "Capacity must be greater than 0");
         require(_owner != address(0), "Owner cannot be zero address");
         require(externalIdToPanelId[_externalId] == 0, "Panel with this external ID already registered");
 
@@ -157,7 +171,8 @@ contract SolarPanelRegistry is
             isActive: true,
             registrationDate: block.timestamp,
             shareTokenAddress: address(0),
-            minimumCapacity: _minimumCapacity
+            saleContractAddress: address(0),
+            capacity: _capacity
         });
 
         externalIdToPanelId[_externalId] = panelId;
@@ -171,7 +186,8 @@ contract SolarPanelRegistry is
             panelId,
             _externalId,
             _owner,
-            address(0) // No token linked yet
+            address(0), // No token linked yet
+            _capacity
         );
         
         return panelId;
@@ -241,6 +257,47 @@ contract SolarPanelRegistry is
         returns (uint256)
     {
         return tokenToPanelId[tokenAddress];
+    }
+
+    /**
+     * @dev Gets the panel ID associated with a sale contract
+     * @param saleAddress The address of the sale contract
+     * @return The panel ID
+     */
+    function getPanelIdBySale(address saleAddress)
+        external
+        view
+        returns (uint256)
+    {
+        return saleToPanelId[saleAddress];
+    }
+
+    /**
+     * @dev Gets the share token address associated with a panel ID
+     * @param panelId The ID of the panel
+     * @return The share token address
+     */
+    function getShareTokenAddress(uint256 panelId)
+        external
+        view
+        returns (address)
+    {
+        require(panels[panelId].owner != address(0), "Panel does not exist");
+        return panels[panelId].shareTokenAddress;
+    }
+
+    /**
+     * @dev Gets the sale contract address associated with a panel ID
+     * @param panelId The ID of the panel
+     * @return The sale contract address
+     */
+    function getSaleContractAddress(uint256 panelId)
+        external
+        view
+        returns (address)
+    {
+        require(panels[panelId].owner != address(0), "Panel does not exist");
+        return panels[panelId].saleContractAddress;
     }
 
     /**

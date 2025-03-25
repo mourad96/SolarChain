@@ -115,7 +115,7 @@ contract DividendDistributor is
         require(amount > 0, "Amount must be greater than 0");
         
         // Get panel from registry
-        (string memory externalId, , bool isActive, , address tokenAddress, ) = panelRegistry.panels(panelId);
+        (string memory externalId, , bool isActive, , address tokenAddress, , ) = panelRegistry.panels(panelId);
         require(bytes(externalId).length > 0, "Panel does not exist");
         require(isActive, "Panel is not active");
         require(tokenAddress != address(0), "Panel has no associated token");
@@ -156,7 +156,7 @@ contract DividendDistributor is
         address holder = msg.sender;
         
         // Get panel from registry
-        (, , bool isActive, , address tokenAddress, ) = panelRegistry.panels(panelId);
+        (, , bool isActive, , address tokenAddress, , ) = panelRegistry.panels(panelId);
         require(isActive, "Panel is not active");
         require(tokenAddress != address(0), "Panel has no associated token");
         
@@ -195,7 +195,7 @@ contract DividendDistributor is
         returns (uint256) 
     {
         // Get panel from registry
-        (, , , , address tokenAddress, ) = panelRegistry.panels(panelId);
+        (, , , , address tokenAddress, , ) = panelRegistry.panels(panelId);
         if (tokenAddress == address(0)) return 0;
         
         // Get token details and holder balance

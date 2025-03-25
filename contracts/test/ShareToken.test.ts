@@ -27,7 +27,7 @@ describe("ShareToken", function () {
     const SolarPanelRegistryFactory = await ethers.getContractFactory("SolarPanelRegistry");
     solarPanelRegistry = await upgrades.deployProxy(
       SolarPanelRegistryFactory, 
-      [minimumPanelCapacity], 
+      [], 
       { initializer: "initialize", kind: "uups" }
     );
     await solarPanelRegistry.waitForDeployment();
@@ -36,7 +36,7 @@ describe("ShareToken", function () {
     const ShareTokenFactory = await ethers.getContractFactory("ShareToken");
     shareToken = await upgrades.deployProxy(
       ShareTokenFactory, 
-      ["Solar Panel Share", "SPS", await solarPanelRegistry.getAddress(), 1], 
+      ["Solar Panel Share", "SPS", await solarPanelRegistry.getAddress(), 1n], 
       { initializer: "initialize", kind: "uups" }
     );
     await shareToken.waitForDeployment();

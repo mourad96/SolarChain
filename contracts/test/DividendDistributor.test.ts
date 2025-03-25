@@ -39,7 +39,7 @@ describe("DividendDistributor", function () {
     const SolarPanelRegistryFactory = await ethers.getContractFactory("SolarPanelRegistry");
     solarPanelRegistry = await upgrades.deployProxy(
       SolarPanelRegistryFactory, 
-      [minimumPanelCapacity], 
+      [], 
       { initializer: "initialize", kind: "uups" }
     );
     await solarPanelRegistry.waitForDeployment();
@@ -63,7 +63,11 @@ describe("DividendDistributor", function () {
       "SN001",
       "Solar Panel Share 1",
       "SPS1",
-      totalShares
+      totalShares,
+      minimumPanelCapacity, // capacity
+      0, // tokensForSale
+      0, // tokenPrice
+      0  // saleEndTime
     );
     const receipt = await tx.wait();
     const event = receipt.logs.find((log: any) => {
@@ -179,7 +183,7 @@ describe("DividendDistributor", function () {
     });
     
     it("Should not allow distribution for non-existent panel", async function () {
-      const nonExistentPanelId = 9999;
+      const nonExistentPanelId = 9999n;
       
       await expect(
         dividendDistributor.distributeDividends(nonExistentPanelId, dividendAmount)

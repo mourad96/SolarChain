@@ -23,7 +23,7 @@ describe("Upgradeable Contracts", function () {
     const SolarPanelRegistry = await ethers.getContractFactory("SolarPanelRegistry");
     const minimumPanelCapacity = ethers.parseEther("0.1");
     
-    registry = await upgrades.deployProxy(SolarPanelRegistry, [minimumPanelCapacity], {
+    registry = await upgrades.deployProxy(SolarPanelRegistry, [], {
       initializer: "initialize",
       kind: "uups",
     });
@@ -32,7 +32,6 @@ describe("Upgradeable Contracts", function () {
     const registryAddress = await registry.getAddress();
     
     expect(registryAddress).to.be.properAddress;
-    expect(await registry.minimumPanelCapacity()).to.equal(minimumPanelCapacity);
   });
 
   it("should deploy SolarPanelFactory", async function () {

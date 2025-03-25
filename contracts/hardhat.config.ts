@@ -1,4 +1,5 @@
 import { HardhatUserConfig } from "hardhat/config";
+import { HardhatNetworkAccountUserConfig } from "hardhat/types/config";
 import "@nomicfoundation/hardhat-toolbox";
 import "@nomicfoundation/hardhat-ethers";
 import "@typechain/hardhat";
@@ -12,19 +13,30 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY || "";
 const AMOY_RPC_URL = process.env.AMOY_RPC_URL || "https://rpc-amoy.polygon.technology";
 const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY || "";
 
+const accounts: HardhatNetworkAccountUserConfig[] = PRIVATE_KEY
+  ? [
+      {
+        privateKey: PRIVATE_KEY,
+        balance: "10000000000000000000000", // 10,000 ETH
+      },
+    ]
+  : [];
+
 const config: HardhatUserConfig = {
   solidity: {
     version: "0.8.24",
     settings: {
       optimizer: {
         enabled: true,
-        runs: 200
-      }
+        runs: 100
+      },
+      viaIR: true
     }
   },
   networks: {
     hardhat: {
-      chainId: 1337
+      chainId: 1337,
+      allowUnlimitedContractSize: true
     },
     sepolia: {
       url: process.env.SEPOLIA_URL || "",

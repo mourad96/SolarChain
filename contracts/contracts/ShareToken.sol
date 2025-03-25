@@ -30,6 +30,9 @@ contract ShareToken is
     // Panel ID this token represents
     uint256 public panelId;
     
+    // Maximum supply of tokens
+    uint256 public maxSupply;
+    
     // Token details
     struct TokenDetails {
         uint256 totalShares;
@@ -50,6 +53,7 @@ contract ShareToken is
     event SharesTransferred(uint256 indexed panelId, address from, address to, uint256 amount);
     event PanelExternalIdUpdated(uint256 indexed panelId, string externalId);
     event EmergencyAction(string action, address indexed triggeredBy);
+    event MaxSupplyUpdated(uint256 previousMaxSupply, uint256 newMaxSupply);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -88,6 +92,9 @@ contract ShareToken is
             isMinted: false,
             panelExternalId: ""
         });
+        
+        // Set default max supply to a high value
+        maxSupply = 1000000 * 10**18; // 1 million tokens with 18 decimals
     }
 
     /**
@@ -110,6 +117,22 @@ contract ShareToken is
     }
 
     /**
+     * @dev Updates the maximum supply of tokens
+     * @param _maxSupply The new maximum supply
+     */
+    function updateMaxSupply(uint256 _maxSupply) 
+        external 
+        onlyRole(ADMIN_ROLE) 
+    {
+        require(_maxSupply >= totalSupply(), "Max supply cannot be less than current total supply");
+        
+        uint256 previousMaxSupply = maxSupply;
+        maxSupply = _maxSupply;
+        
+        emit MaxSupplyUpdated(previousMaxSupply, _maxSupply);
+    }
+
+    /**
      * @dev Mints shares for a panel
      * @param amount The amount of shares to mint
      * @param to The address to receive the shares
@@ -120,19 +143,21 @@ contract ShareToken is
         onlyRole(MINTER_ROLE) 
     {
         require(amount > 0, "Amount must be greater than 0");
-        require(!tokenDetails.isMinted, "Shares already minted for this panel");
         require(to != address(0), "Cannot mint to zero address");
+        require(totalSupply() + amount <= maxSupply, "Exceeds max supply");
         
         // Get panel from registry to check existence and status
-        (string memory externalId, , bool isActive, , , ) = panelRegistry.panels(panelId);
+        (string memory externalId, , bool isActive, , , , ) = panelRegistry.panels(panelId);
         require(bytes(externalId).length > 0, "Panel does not exist");
         require(isActive, "Panel is not active");
         
-        tokenDetails.totalShares = amount;
+        require(!tokenDetails.isMinted, "Shares already minted for this panel");
         tokenDetails.isMinted = true;
+        
+        tokenDetails.totalShares += amount;
 
         _mint(to, amount);
-        holderBalances[to] = amount;
+        holderBalances[to] += amount;
         
         if (!isHolder[to]) {
             tokenHolders.push(to);

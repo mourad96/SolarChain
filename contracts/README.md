@@ -5,13 +5,16 @@ This repository contains the smart contracts for the Solar Energy IoFy platform,
 ## Contracts
 
 ### SolarPanelRegistry.sol
-The central registry for all solar panels. It stores panel details and manages ownership.
+The central registry for all solar panels. It stores panel details and manages ownership. Also maintains the relationships between panels, share tokens, and token sales.
 
 ### SolarPanelFactory.sol
 Factory contract for batch registration of solar panels. Uses the Factory pattern to efficiently register multiple panels at once.
 
 ### ShareToken.sol
 ERC20 token representing shares in solar panels. Allows for the tokenization of solar panel ownership.
+
+### TokenSale.sol
+Manages the sale of share tokens to investors. Each sale is linked to a specific panel in the registry.
 
 ### DividendDistributor.sol
 Handles the distribution of dividends to solar panel share holders.
@@ -112,3 +115,191 @@ MIT
 > Note: These contracts are upgradeable using the UUPS proxy pattern. The proxy address is the address you interact with, while the implementation address contains the actual logic.
 
 Last deployed: 2025-03-17T14:52:12.698Z
+
+# Solar Energy Tokenization Platform
+
+This project implements a tokenization platform for solar panels, allowing:
+1. Registration of solar panels
+2. Creation of ERC-20 tokens representing shares in each panel
+3. Sale of these tokens to investors
+
+## Contract Structure
+
+### Core Contracts
+
+- **SolarPanelRegistry**: Maintains the registry of all solar panels and links between panels, tokens, and sales
+- **ShareToken**: ERC-20 token representing shares in a specific solar panel
+- **SolarPanelFactory**: Factory contract for creating panels and their tokens
+- **TokenSale**: Contract for selling shares to investors
+
+## Registry Linkage
+
+The `SolarPanelRegistry` contract maintains bidirectional relationships between:
+- Panels and their share tokens
+- Panels and their token sales
+
+These linkages enable:
+1. Finding a panel by its share token address
+2. Finding a panel by its token sale address
+3. Finding a token sale by its panel ID
+4. Finding a share token by its panel ID
+
+Key functions in the registry:
+- `linkShareToken(uint256 panelId, address tokenAddress)`: Links a share token to a panel
+- `linkSaleContract(uint256 panelId, address saleAddress)`: Links a token sale to a panel
+- `getShareTokenAddress(uint256 panelId)`: Gets the share token address for a panel
+- `getSaleContractAddress(uint256 panelId)`: Gets the token sale address for a panel
+- `getPanelIdByToken(address tokenAddress)`: Gets the panel ID for a share token
+- `getPanelIdBySale(address saleAddress)`: Gets the panel ID for a token sale
+
+## How to Use the Token Sale Feature
+
+The platform supports a token sale mechanism that allows investors to purchase shares in solar panels. There are two ways to set up a token sale:
+
+### 1. Creating a Panel with Integrated Token Sale
+
+The panel owner can create a panel, its share token, and a token sale in a single transaction using the enhanced `createPanelWithShares` function:
+
+```solidity
+function createPanelWithShares(
+    string memory externalId,
+    string memory tokenName,
+    string memory tokenSymbol,
+    uint256 totalShares,
+    uint256 capacity,
+    uint256 tokensForSale,
+    uint256 tokenPrice,
+    uint256 saleEndTime
+)
+```
+
+A token sale will be automatically created if `tokensForSale` is greater than 0. The function will:
+- Register the panel
+- Create the share token
+- Mint the total shares to the owner
+- Create a token sale contract (if tokensForSale > 0)
+- Transfer the specified tokens to the sale contract (if tokensForSale > 0)
+- Link the token sale to the panel in the registry (if tokensForSale > 0)
+
+Example:
+```javascript
+// Create panel with integrated token sale
+const result = await factory.createPanelWithShares(
+  "PANEL123",                          // External ID
+  "Solar Share",                       // Token name
+  "SOLAR",                             // Token symbol
+  ethers.utils.parseEther("1000"),     // Total shares (1000 tokens)
+  5000,                                // Capacity (5kW)
+  ethers.utils.parseEther("500"),      // Tokens for sale (500 tokens) - Set to 0 to skip sale creation
+  ethers.utils.parseEther("0.01"),     // Price (0.01 ETH per token)
+  Math.floor(Date.now() / 1000) + 86400 // End time (1 day from now)
+);
+```
+
+The function returns:
+- `panelId`: The ID of the created panel
+- `tokenAddress`: The address of the created share token
+- `saleAddress`: The address of the created token sale contract (or address(0) if no sale was created)
+
+### 2. Creating a Panel First, Then Setting Up a Sale
+
+Alternatively, you can:
+
+a. Create a panel with shares using the legacy `createPanelWithShares` function:
+```solidity
+function createPanelWithShares(
+    string memory externalId,
+    string memory tokenName,
+    string memory tokenSymbol,
+    uint256 totalShares,
+    uint256 capacity
+)
+```
+
+b. Then create a token sale for the existing share token:
+```solidity
+function createTokenSale(
+    address shareTokenAddress,
+    uint256 price,
+    uint256 tokensForSale,
+    uint256 saleEndTime
+)
+```
+
+This two-step process also properly links the sale contract to the panel in the registry, allowing you to query the registry to find the sale contract for a specific panel, or to find which panel a sale contract belongs to.
+
+### 3. Using the Convenience Function
+
+For backward compatibility, you can also use this convenience function which internally calls the enhanced `createPanelWithShares`:
+
+```solidity
+function createPanelWithSale(
+    string memory externalId,
+    string memory tokenName,
+    string memory tokenSymbol,
+    uint256 totalShares,
+    uint256 capacity,
+    uint256 tokensForSale,
+    uint256 price,
+    uint256 saleEndTime
+)
+```
+
+## Purchasing Tokens
+
+Investors can purchase tokens by calling the `purchaseTokens` function on the TokenSale contract:
+
+```solidity
+function purchaseTokens(uint256 amount) external payable
+```
+
+The investor must send the exact amount of ETH corresponding to the number of tokens they want to purchase:
+- Required ETH = token amount × token price
+
+## Managing the Sale
+
+The sale owner can:
+- Update the token price: `updatePrice(uint256 _newPrice)`
+- Update the sale end time: `updateSaleEndTime(uint256 _newEndTime)`
+- Activate/deactivate the sale: `setSaleStatus(bool _isActive)`
+- Withdraw collected funds: `withdrawFunds(address payable to)`
+- Withdraw unsold tokens after the sale ends: `withdrawRemainingTokens(address to)`
+
+## Example Workflow
+
+1. Admin creates a panel with an integrated token sale:
+   ```javascript
+   const [panelId, tokenAddress, saleAddress] = await factory.createPanelWithShares(
+     "PANEL123",                          // External ID
+     "Solar Share",                       // Token name
+     "SOLAR",                             // Token symbol
+     ethers.utils.parseEther("1000"),     // Total shares (1000 tokens)
+     5000,                                // Capacity (5kW)
+     ethers.utils.parseEther("500"),      // Tokens for sale (500 tokens)
+     ethers.utils.parseEther("0.01"),     // Price (0.01 ETH per token)
+     Math.floor(Date.now() / 1000) + 86400 // End time (1 day from now)
+   );
+   
+   // Get the token sale contract instance
+   const tokenSale = await ethers.getContractAt("TokenSale", saleAddress);
+   ```
+
+2. Investor purchases tokens:
+   ```javascript
+   await tokenSale.purchaseTokens(
+     ethers.utils.parseEther("10"),       // Purchase 10 tokens
+     { value: ethers.utils.parseEther("0.1") } // Pay 0.1 ETH (10 * 0.01)
+   );
+   ```
+
+3. Admin withdraws funds:
+   ```javascript
+   await tokenSale.withdrawFunds(adminAddress);
+   ```
+
+## Security Considerations
+
+- The token sale contract includes pause functionality for emergencies
+- Role-based access control restricts administrative functions
+- The contract includes checks to prevent common errors (e.g., incorrect payment amounts)
+- All contracts are upgradeable using the UUPS proxy pattern

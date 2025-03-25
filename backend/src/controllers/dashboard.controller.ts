@@ -1,11 +1,22 @@
 import { Response } from 'express';
-import { prisma } from '../config/prisma';
 import { AuthenticatedRequest } from '../types/auth';
-import { IoTReading } from '@prisma/client';
 import { ethers } from 'ethers';
 import { config } from '../config';
 import { DividendDistributor__factory } from '../typechain-types';
 import { logger } from '../utils/logger';
+import { prisma } from '../services/prisma.service';
+
+interface IoTReading {
+  id: string;
+  deviceId: string;
+  energyOutput: number;
+  temperature: number;
+  voltage: number;
+  current: number;
+  timestamp: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 interface PanelWithName {
   id: string;

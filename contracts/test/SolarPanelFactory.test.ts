@@ -1,18 +1,21 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
-const { upgrades } = require("hardhat");
+import { expect } from "chai";
+import { ethers } from "hardhat";
+import { upgrades } from "hardhat";
+import { Signer } from "ethers";
 
 describe("SolarPanelFactory", function () {
-  let solarPanelRegistry;
-  let solarPanelFactory;
-  let owner;
-  let user1;
-  let user2;
+  // Using any type here temporarily to fix the immediate issue
+  let solarPanelRegistry: any;
+  let solarPanelFactory: any;
+  let owner: Signer;
+  let user1: Signer;
+  let user2: Signer;
   
   const ADMIN_ROLE = ethers.keccak256(ethers.toUtf8Bytes("ADMIN_ROLE"));
   const REGISTRAR_ROLE = ethers.keccak256(ethers.toUtf8Bytes("REGISTRAR_ROLE"));
   const DEFAULT_ADMIN_ROLE = ethers.ZeroHash;
-  const minimumPanelCapacity = ethers.parseEther("0.1");
+  // We'll keep this for using as capacity parameter in createPanelWithShares
+  const panelCapacity = ethers.parseEther("0.1");
   const totalShares = ethers.parseEther("1000");
 
   beforeEach(async function () {
@@ -22,7 +25,7 @@ describe("SolarPanelFactory", function () {
     const SolarPanelRegistryFactory = await ethers.getContractFactory("SolarPanelRegistry");
     solarPanelRegistry = await upgrades.deployProxy(
       SolarPanelRegistryFactory, 
-      [minimumPanelCapacity], 
+      [], 
       { initializer: "initialize", kind: "uups" }
     );
     await solarPanelRegistry.waitForDeployment();
@@ -43,14 +46,14 @@ describe("SolarPanelFactory", function () {
     await solarPanelRegistry.grantRole(DEFAULT_ADMIN_ROLE, await solarPanelFactory.getAddress());
     
     // Grant REGISTRAR_ROLE to owner in factory
-    await solarPanelFactory.grantRole(REGISTRAR_ROLE, owner.address);
+    await solarPanelFactory.grantRole(REGISTRAR_ROLE, await owner.getAddress());
   });
 
   describe("Deployment", function () {
     it("Should set the right roles", async function () {
-      expect(await solarPanelFactory.hasRole(DEFAULT_ADMIN_ROLE, owner.address)).to.be.true;
-      expect(await solarPanelFactory.hasRole(ADMIN_ROLE, owner.address)).to.be.true;
-      expect(await solarPanelFactory.hasRole(REGISTRAR_ROLE, owner.address)).to.be.true;
+      expect(await solarPanelFactory.hasRole(DEFAULT_ADMIN_ROLE, await owner.getAddress())).to.be.true;
+      expect(await solarPanelFactory.hasRole(ADMIN_ROLE, await owner.getAddress())).to.be.true;
+      expect(await solarPanelFactory.hasRole(REGISTRAR_ROLE, await owner.getAddress())).to.be.true;
     });
 
     it("Should set the right registry address in factory", async function () {
@@ -60,14 +63,19 @@ describe("SolarPanelFactory", function () {
 
   describe("Access Control", function () {
     it("Should not allow non-registrars to register panels", async function () {
+      const user1Address = await user1.getAddress();
       await expect(
         solarPanelFactory.connect(user1).createPanelWithShares(
           "TEST001",
           "Test Panel Token",
           "TPT",
-          totalShares
+          totalShares,
+          panelCapacity, // capacity
+          0, // tokensForSale
+          0, // tokenPrice
+          0  // saleEndTime
         )
-      ).to.be.revertedWith("AccessControl: account " + user1.address.toLowerCase() + " is missing role " + REGISTRAR_ROLE);
+      ).to.be.revertedWith("AccessControl: account " + user1Address.toLowerCase() + " is missing role " + REGISTRAR_ROLE);
     });
 
     it("Should allow pausing and unpausing by admin", async function () {
@@ -78,7 +86,11 @@ describe("SolarPanelFactory", function () {
           "TEST001",
           "Test Panel Token",
           "TPT",
-          totalShares
+          totalShares,
+          panelCapacity, // capacity
+          0, // tokensForSale
+          0, // tokenPrice
+          0  // saleEndTime
         )
       ).to.be.revertedWith("Pausable: paused");
       
@@ -88,18 +100,24 @@ describe("SolarPanelFactory", function () {
         "TEST001",
         "Test Panel Token",
         "TPT",
-        totalShares
+        totalShares,
+        panelCapacity, // capacity
+        0, // tokensForSale
+        0, // tokenPrice
+        0  // saleEndTime
       );
     });
 
     it("Should not allow non-admins to pause/unpause", async function () {
+      const user1Address = await user1.getAddress();
+      
       await expect(
         solarPanelFactory.connect(user1).pause()
-      ).to.be.revertedWith("AccessControl: account " + user1.address.toLowerCase() + " is missing role " + ADMIN_ROLE);
+      ).to.be.revertedWith("AccessControl: account " + user1Address.toLowerCase() + " is missing role " + ADMIN_ROLE);
       
       await expect(
         solarPanelFactory.connect(user1).unpause()
-      ).to.be.revertedWith("AccessControl: account " + user1.address.toLowerCase() + " is missing role " + ADMIN_ROLE);
+      ).to.be.revertedWith("AccessControl: account " + user1Address.toLowerCase() + " is missing role " + ADMIN_ROLE);
     });
   });
 }); 

@@ -1,6 +1,6 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
-const { upgrades } = require("hardhat");
+import { expect } from "chai";
+import { ethers } from "hardhat";
+import { upgrades } from "hardhat";
 
 describe("Solar Energy IoFy Integration Tests", function () {
   let registry;
@@ -48,7 +48,7 @@ describe("Solar Energy IoFy Integration Tests", function () {
     const SolarPanelRegistryFactory = await ethers.getContractFactory("SolarPanelRegistry");
     registry = await upgrades.deployProxy(
       SolarPanelRegistryFactory, 
-      [minimumPanelCapacity], 
+      [], 
       { initializer: "initialize", kind: "uups" }
     );
     await registry.waitForDeployment();
@@ -86,7 +86,11 @@ describe("Solar Energy IoFy Integration Tests", function () {
       "SN001",
       "Solar Panel Share 1",
       "SPS1",
-      ethers.parseEther("1000")
+      ethers.parseEther("1000"),
+      minimumPanelCapacity,
+      0,
+      0,
+      0
     );
     const receipt1 = await tx1.wait();
     const event1 = receipt1.logs.find(log => {
@@ -108,7 +112,11 @@ describe("Solar Energy IoFy Integration Tests", function () {
       "SN002",
       "Solar Panel Share 2",
       "SPS2",
-      ethers.parseEther("1500")
+      ethers.parseEther("1000"),
+      minimumPanelCapacity,
+      0,
+      0,
+      0
     );
     const receipt2 = await tx2.wait();
     const event2 = receipt2.logs.find(log => {

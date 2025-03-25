@@ -4,9 +4,23 @@ import { prisma } from '../services/prisma.service';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { ShareToken__factory, DividendDistributor__factory } from '../typechain-types';
-import type { Panel } from '@prisma/client';
 import { JsonValue } from '@prisma/client/runtime/library';
 import { v4 as uuidv4 } from 'uuid';
+
+// Define our own interfaces based on the database schema
+interface Panel {
+  id: string;
+  name: string;
+  location: string;
+  capacity: number;
+  status: string;
+  ownerId: string;
+  blockchainTxHash?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  blockchainPanelId?: string | null;
+  blockchainTokenAddress?: string | null;
+}
 
 interface ShareToken {
   id: string;
@@ -234,7 +248,7 @@ export const getTokenDetails = async (req: Request, res: Response): Promise<void
       SELECT t.*, p.* 
       FROM share_tokens t
       JOIN panels p ON t."panelId" = p.id
-      JOIN users u ON p."ownerId" = u.id
+      JOIN "User" u ON p."ownerId" = u.id
       WHERE t."panelId" = ${panelId}
     `;
     
@@ -298,7 +312,7 @@ export const listTokens = async (req: Request, res: Response): Promise<void> => 
       SELECT t.*, p.*, o.*
       FROM share_tokens t
       LEFT JOIN panels p ON t."panelId" = p.id
-      LEFT JOIN users o ON p."ownerId" = o.id
+      LEFT JOIN "User" o ON p."ownerId" = o.id
       ORDER BY t."createdAt" DESC
     `;
 
@@ -360,7 +374,7 @@ export const listTokens = async (req: Request, res: Response): Promise<void> => 
       
       // Check if there are any users with wallet addresses
       const usersWithWallets = await prisma.$queryRaw<any[]>`
-        SELECT * FROM users WHERE "walletAddress" IS NOT NULL
+        SELECT * FROM "User" WHERE "walletAddress" IS NOT NULL
       `;
       console.log(`Found ${usersWithWallets.length} users with wallet addresses`);
     }
@@ -407,8 +421,8 @@ export const listTokens = async (req: Request, res: Response): Promise<void> => 
                 
                 // Check if the user has any balance for this token
                 try {
-                  console.log(`Calling balanceOf(${user.walletAddress}) for panel ${panel.id}`);
-                  const holderBalance = await shareToken.balanceOf(user.walletAddress);
+                  console.log(`Calling getHolderBalance(${user.walletAddress}) for panel ${panel.id}`);
+                  const holderBalance = await shareToken.getHolderBalance(user.walletAddress);
                   console.log(`User balance for token: ${holderBalance.toString()}`);
                   
                   if (holderBalance && holderBalance.toString() !== '0') {
@@ -482,7 +496,7 @@ export const listTokens = async (req: Request, res: Response): Promise<void> => 
                     console.log('User has zero balance for this token, skipping');
                   }
                 } catch (balanceError) {
-                  console.error(`Error calling balanceOf for wallet ${user.walletAddress}:`, balanceError);
+                  console.error(`Error calling getHolderBalance for wallet ${user.walletAddress}:`, balanceError);
                 }
                 
                 // If unclaimed dividends are available and dividendDistributor is defined
@@ -648,13 +662,13 @@ export const getTokenHolders = async (req: Request, res: Response): Promise<void
     }
 
     // Get on-chain holders
-    const holders = await shareToken.getPanelHolders(token.onChainTokenId);
+    const holders = await shareToken.getTokenHolders();
 
     // Get holder details from database
     const holderDetails = await Promise.all(
       holders.map(async (address: string) => {
         const users = await prisma.$queryRaw<any[]>`
-          SELECT id, email FROM users WHERE "walletAddress" = ${address}
+          SELECT id, email FROM "User" WHERE "walletAddress" = ${address}
         `;
         const user = users.length > 0 ? users[0] : null;
         const balances = token.holderBalances as HolderBalances;

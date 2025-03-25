@@ -26,7 +26,7 @@ describe("SolarPanelRegistry", function () {
     
     solarPanelRegistry = await upgrades.deployProxy(
       SolarPanelRegistryFactory, 
-      [minimumPanelCapacity], 
+      [], 
       { initializer: "initialize", kind: "uups" }
     );
     
@@ -51,7 +51,7 @@ describe("SolarPanelRegistry", function () {
         owner.address
       );
 
-      const panelId = 1; // First panel should have ID 1
+      const panelId = 1n; // First panel should have ID 1
       const panel = await solarPanelRegistry.panels(panelId);
 
       expect(panel.externalId).to.equal(externalId);
@@ -136,7 +136,7 @@ describe("SolarPanelRegistry", function () {
 
     it("should not allow capacity below minimum", async function () {
       const externalId = "PANEL005";
-      const capacity = ethers.parseEther("0.05"); // Below minimum
+      const capacity = ethers.parseEther("0"); // Zero capacity instead of below minimum
 
       await expect(
         solarPanelRegistry.registerPanelByFactory(
@@ -144,7 +144,7 @@ describe("SolarPanelRegistry", function () {
           capacity,
           owner.address
         )
-      ).to.be.revertedWith("Capacity below minimum requirement");
+      ).to.be.revertedWith("Capacity must be greater than 0");
     });
 
     it("should emit PanelRegistered event", async function () {
@@ -159,7 +159,7 @@ describe("SolarPanelRegistry", function () {
         )
       )
         .to.emit(solarPanelRegistry, "PanelRegistered")
-        .withArgs(1, externalId, owner.address, ethers.ZeroAddress);
+        .withArgs(1, externalId, owner.address, ethers.ZeroAddress, capacity);
     });
   });
 

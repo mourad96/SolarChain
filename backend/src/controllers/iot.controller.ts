@@ -1,12 +1,10 @@
 import { Request, Response } from 'express';
 import { ethers } from 'ethers';
-import { PrismaClient } from '@prisma/client';
 import { SolarPanelContract } from '../typechain-types/contracts/SolarPanel';
 import { AuthenticatedRequest } from '../types/auth';
 import { config } from '../config';
 import { logger } from '../utils/logger';
-
-const prisma = new PrismaClient();
+import { prisma } from '../services/prisma.service';
 
 interface IoTReading {
   id: string;
