@@ -25,6 +25,7 @@ contract SolarPanelFactory is
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
     
     SolarPanelRegistry public registry;
+    address public defaultPaymentToken;
     
     event PanelAndSharesCreated(
         uint256 indexed panelId, 
@@ -39,9 +40,11 @@ contract SolarPanelFactory is
         address indexed shareToken,
         address indexed saleContract,
         uint256 price,
-        uint256 tokensForSale,
+        uint256 totalShares,
         uint256 saleEndTime
     );
+    
+    event DefaultPaymentTokenUpdated(address indexed paymentToken);
     
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -52,7 +55,8 @@ contract SolarPanelFactory is
      * @dev Initializes the contract replacing the constructor for upgradeable contracts
      */
     function initialize(
-        address _registryAddress
+        address _registryAddress,
+        address _defaultPaymentToken
     ) public initializer {
         __AccessControl_init();
         __Pausable_init();
@@ -64,7 +68,12 @@ contract SolarPanelFactory is
         _grantRole(UPGRADER_ROLE, msg.sender);
         
         require(_registryAddress != address(0), "Invalid registry address");
+        require(_defaultPaymentToken != address(0), "Invalid payment token address");
+        
         registry = SolarPanelRegistry(_registryAddress);
+        defaultPaymentToken = _defaultPaymentToken;
+        
+        emit DefaultPaymentTokenUpdated(_defaultPaymentToken);
     }
     
     /**
@@ -73,15 +82,25 @@ contract SolarPanelFactory is
     function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
     
     /**
+     * @dev Updates the default payment token
+     * @param _defaultPaymentToken The address of the default payment token
+     */
+    function updateDefaultPaymentToken(address _defaultPaymentToken) external onlyRole(ADMIN_ROLE) {
+        require(_defaultPaymentToken != address(0), "Invalid payment token address");
+        defaultPaymentToken = _defaultPaymentToken;
+        emit DefaultPaymentTokenUpdated(_defaultPaymentToken);
+    }
+    
+    /**
      * @dev Creates a new solar panel with its associated share token in a single transaction
      * @param externalId The external ID linking to off-chain metadata
      * @param tokenName The name of the token
      * @param tokenSymbol The symbol of the token
-     * @param totalShares The total number of shares to mint
      * @param capacity The capacity of the panel
-     * @param tokensForSale The number of tokens to sell (set to 0 if no sale is needed)
-     * @param tokenPrice The price per token in wei (only used if tokensForSale > 0)
-     * @param saleEndTime The end time of the sale (only used if tokensForSale > 0)
+     * @param totalShares The number of tokens to sell (set to 0 if no sale is needed)
+     * @param tokenPrice The price per token in payment tokens (only used if totalShares > 0)
+     * @param saleEndTime The end time of the sale (only used if totalShares > 0)
+     * @param paymentToken The address of the payment token to use (optional - if zero address, uses defaultPaymentToken)
      * @return panelId The ID of the created panel
      * @return tokenAddress The address of the created token
      * @return saleAddress The address of the created sale contract (address(0) if no sale was created)
@@ -90,11 +109,11 @@ contract SolarPanelFactory is
         string memory externalId,
         string memory tokenName,
         string memory tokenSymbol,
-        uint256 totalShares,
         uint256 capacity,
-        uint256 tokensForSale,
+        uint256 totalShares,
         uint256 tokenPrice,
-        uint256 saleEndTime
+        uint256 saleEndTime,
+        address paymentToken
     ) public whenNotPaused onlyRole(REGISTRAR_ROLE) returns (uint256 panelId, address tokenAddress, address saleAddress) {
         require(bytes(externalId).length > 0, "External ID cannot be empty");
         require(bytes(tokenName).length > 0, "Token name cannot be empty");
@@ -102,13 +121,16 @@ contract SolarPanelFactory is
         require(totalShares > 0, "Total shares must be greater than 0");
         require(capacity > 0, "Capacity must be greater than 0");
         
+        // Use default payment token if none specified
+        address actualPaymentToken = paymentToken == address(0) ? defaultPaymentToken : paymentToken;
+        
         // Determine if a sale should be created
-        bool createSale = tokensForSale > 0;
+        bool createSale = totalShares > 0;
         
         if (createSale) {
-            require(tokensForSale <= totalShares, "Tokens for sale exceeds total shares");
             require(tokenPrice > 0, "Token price must be greater than 0");
             require(saleEndTime > block.timestamp, "Sale end time must be in the future");
+            require(actualPaymentToken != address(0), "Payment token address cannot be zero");
         }
         
         // Register panel and deploy token
@@ -137,6 +159,8 @@ contract SolarPanelFactory is
             bytes memory saleInitData = abi.encodeWithSelector(
                 TokenSale(address(0)).initialize.selector,
                 address(shareToken),
+                actualPaymentToken,
+                totalShares,
                 tokenPrice,
                 saleEndTime
             );
@@ -159,7 +183,7 @@ contract SolarPanelFactory is
                 address(shareToken),
                 address(tokenSale),
                 tokenPrice,
-                tokensForSale,
+                totalShares,
                 saleEndTime
             );
             

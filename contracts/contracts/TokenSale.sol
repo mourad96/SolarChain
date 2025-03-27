@@ -8,10 +8,11 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./ShareToken.sol";
+//import "hardhat/console.sol";
 
 /**
  * @title TokenSale
- * @dev Contract for selling ShareTokens to investors
+ * @dev Contract for selling ShareTokens to investors using USDC instead of ETH
  * @notice This contract is upgradeable using the UUPS proxy pattern
  */
 contract TokenSale is
@@ -26,7 +27,8 @@ contract TokenSale is
     bytes32 public constant SALE_MANAGER_ROLE = keccak256("SALE_MANAGER_ROLE");
 
     ShareToken public shareToken;
-    uint256 public price; // Price in wei per token
+    IERC20 public paymentToken; // Payment token (USDC)
+    uint256 public price; // Price in payment tokens per share token
     uint256 public availableTokens;
     uint256 public soldTokens;
     uint256 public saleEndTime;
@@ -38,6 +40,7 @@ contract TokenSale is
     event FundsWithdrawn(address indexed to, uint256 amount);
     event SaleStatusChanged(bool isActive);
     event SaleEndTimeUpdated(uint256 newEndTime);
+    event PaymentTokenSet(address indexed paymentTokenAddress);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -49,6 +52,8 @@ contract TokenSale is
      */
     function initialize(
         address _shareTokenAddress,
+        address _paymentTokenAddress,
+        uint256 _totalShares,
         uint256 _price,
         uint256 _saleEndTime
     ) public initializer {
@@ -63,6 +68,7 @@ contract TokenSale is
         _grantRole(SALE_MANAGER_ROLE, msg.sender);
 
         require(_shareTokenAddress != address(0), "Invalid token address");
+        require(_paymentTokenAddress != address(0), "Invalid payment token address");
         require(_price > 0, "Price must be greater than 0");
         require(
             _saleEndTime > block.timestamp,
@@ -70,11 +76,14 @@ contract TokenSale is
         );
 
         shareToken = ShareToken(_shareTokenAddress);
+        paymentToken = IERC20(_paymentTokenAddress);
         price = _price;
         saleEndTime = _saleEndTime;
         isSaleActive = true;
+        availableTokens = _totalShares;
 
         emit TokenSaleCreated(_shareTokenAddress, _price);
+        emit PaymentTokenSet(_paymentTokenAddress);
     }
 
     /**
@@ -85,33 +94,60 @@ contract TokenSale is
     ) internal override onlyRole(UPGRADER_ROLE) {}
 
     /**
-     * @dev Allows users to purchase tokens
+     * @dev Set or update the payment token
+     * @param _paymentTokenAddress The address of the payment token (USDC)
+     */
+    function setPaymentToken(
+        address _paymentTokenAddress
+    ) external onlyRole(ADMIN_ROLE) {
+        require(_paymentTokenAddress != address(0), "Invalid payment token address");
+        paymentToken = IERC20(_paymentTokenAddress);
+        emit PaymentTokenSet(_paymentTokenAddress);
+    }
+
+    /**
+     * @dev Allows users to purchase tokens using USDC
      * @param amount The amount of tokens to purchase
      */
     function purchaseTokens(
         uint256 amount
-    ) external payable whenNotPaused nonReentrant {
+    ) external whenNotPaused nonReentrant {
         require(isSaleActive, "Sale is not active");
         require(block.timestamp < saleEndTime, "Sale has ended");
         require(amount > 0, "Amount must be greater than 0");
 
         uint256 tokensAvailable = shareToken.balanceOf(address(this));
         require(amount <= tokensAvailable, "Not enough tokens available");
-        require(msg.value == amount * price, "Incorrect payment amount");
+        
+        uint256 paymentAmount = amount * price;
 
+       // Debug logs: Print key variables before transferring tokens
+        //uint256 currentAllowance = paymentToken.allowance(msg.sender, address(this));
+        //console.log("msg.sender:", msg.sender);
+        //console.log("Contract:", address(this));
+        //console.log("Payment Amount:", paymentAmount);
+        //console.log("Allowance:", currentAllowance);
+        
         // Effects: update state before external call
         soldTokens += amount;
         // Optionally, update availableTokens if you intend to use it later
         availableTokens = tokensAvailable - amount;
 
-        // Interactions: transfer tokens
+        // Transfer payment tokens from buyer to this contract
         require(
-            shareToken.transfer(msg.sender, amount),
-            "Token transfer failed"
+            paymentToken.transferFrom(msg.sender, address(this), paymentAmount),
+            "Payment token transfer failed"
         );
 
-        emit TokensPurchased(msg.sender, amount, msg.value);
+        // Interactions: transfer share tokens to buyer
+        require(
+            shareToken.transfer(msg.sender, amount),
+            "Share token transfer failed"
+        );
+
+        emit TokensPurchased(msg.sender, amount, paymentAmount);
     }
+
 
     /**
      * @dev Updates the token price
@@ -152,16 +188,18 @@ contract TokenSale is
     }
 
     /**
-     * @dev Withdraws the contract's ether balance
+     * @dev Withdraws the contract's payment token balance
      * @param to The address to send the funds to
      */
-    function withdrawFunds(address payable to) external onlyRole(ADMIN_ROLE) {
+    function withdrawFunds(address to) external onlyRole(ADMIN_ROLE) {
         require(to != address(0), "Cannot withdraw to zero address");
-        uint256 balance = address(this).balance;
+        uint256 balance = paymentToken.balanceOf(address(this));
         require(balance > 0, "No funds to withdraw");
 
-        (bool sent, ) = to.call{value: balance}("");
-        require(sent, "Failed to withdraw funds");
+        require(
+            paymentToken.transfer(to, balance),
+            "Payment token transfer failed"
+        );
 
         emit FundsWithdrawn(to, balance);
     }
@@ -176,13 +214,14 @@ contract TokenSale is
             "Sale must be ended or inactive"
         );
         require(to != address(0), "Cannot withdraw to zero address");
-        require(availableTokens > 0, "No tokens to withdraw");
+        
+        uint256 tokensAvailable = shareToken.balanceOf(address(this));
+        require(tokensAvailable > 0, "No tokens to withdraw");
 
-        uint256 tokensToWithdraw = availableTokens;
         availableTokens = 0;
 
         require(
-            shareToken.transfer(to, tokensToWithdraw),
+            shareToken.transfer(to, tokensAvailable),
             "Token transfer failed"
         );
     }

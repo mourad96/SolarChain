@@ -38,9 +38,26 @@ describe("Upgradeable Contracts", function () {
     const SolarPanelFactory = await ethers.getContractFactory("SolarPanelFactory");
     const registryAddress = await registry.getAddress();
     
+    // Deploy MockERC20 first if not yet deployed
+    if (!mockToken) {
+      const MockERC20 = await ethers.getContractFactory("MockERC20");
+      mockToken = await upgrades.deployProxy(
+        MockERC20,
+        ["USD Coin", "USDC"],
+        {
+          initializer: "initialize",
+          kind: "uups",
+        }
+      );
+      
+      await mockToken.waitForDeployment();
+    }
+    
+    const mockTokenAddress = await mockToken.getAddress();
+    
     factory = await upgrades.deployProxy(
       SolarPanelFactory,
-      [registryAddress],
+      [registryAddress, mockTokenAddress],
       {
         initializer: "initialize",
         kind: "uups",

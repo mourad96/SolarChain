@@ -44,55 +44,6 @@ describe("DividendDistributor", function () {
     );
     await solarPanelRegistry.waitForDeployment();
 
-    // Deploy SolarPanelFactory using upgrades.deployProxy
-    const SolarPanelFactoryFactory = await ethers.getContractFactory("SolarPanelFactory");
-    const factory = await upgrades.deployProxy(
-      SolarPanelFactoryFactory,
-      [await solarPanelRegistry.getAddress()],
-      { initializer: "initialize", kind: "uups" }
-    );
-    await factory.waitForDeployment();
-
-    // Grant roles
-    await solarPanelRegistry.grantRole(FACTORY_ROLE, await factory.getAddress());
-    await solarPanelRegistry.grantRole(DEFAULT_ADMIN_ROLE, await factory.getAddress());
-    await factory.grantRole(REGISTRAR_ROLE, owner.address);
-    
-    // Create panel with shares
-    const tx = await factory.createPanelWithShares(
-      "SN001",
-      "Solar Panel Share 1",
-      "SPS1",
-      totalShares,
-      minimumPanelCapacity, // capacity
-      0, // tokensForSale
-      0, // tokenPrice
-      0  // saleEndTime
-    );
-    const receipt = await tx.wait();
-    const event = receipt.logs.find((log: any) => {
-      try {
-        const parsed = factory.interface.parseLog(log);
-        return parsed?.name === 'PanelAndSharesCreated';
-      } catch (e) {
-        return false;
-      }
-    });
-    
-    if (!event) {
-      throw new Error("PanelAndSharesCreated event not found");
-    }
-    
-    const parsedLog = factory.interface.parseLog(event);
-    panelId = parsedLog.args.panelId;
-    const shareTokenAddress = parsedLog.args.shareToken;
-    
-    shareToken = await ethers.getContractAt("ShareToken", shareTokenAddress);
-    
-    // Transfer some shares to users
-    await shareToken.transfer(user1.address, user1Shares);
-    await shareToken.transfer(user2.address, user2Shares);
-    
     // Deploy MockERC20 using upgrades.deployProxy
     const MockERC20Factory = await ethers.getContractFactory("MockERC20");
     mockToken = await upgrades.deployProxy(
@@ -104,6 +55,58 @@ describe("DividendDistributor", function () {
     
     // Mint tokens to owner for distribution
     await mockToken.mint(owner.address, ethers.parseEther("1000"));
+    
+    // Register a panel directly through the registry
+    await solarPanelRegistry.grantRole(FACTORY_ROLE, owner.address);
+    
+    const panelExternalId = "SN001";
+    await solarPanelRegistry.registerPanelByFactory(
+      panelExternalId,
+      minimumPanelCapacity,
+      owner.address
+    );
+    
+    // Get the panel ID using getPanelIdByExternalId
+    panelId = await solarPanelRegistry.getPanelIdByExternalId(panelExternalId);
+    
+    // Deploy a share token manually
+    const ShareTokenFactory = await ethers.getContractFactory("ShareToken");
+    const shareTokenImpl = await ShareTokenFactory.deploy();
+    await shareTokenImpl.waitForDeployment();
+    
+    // Create a proxy for the share token
+    const ShareTokenProxyFactory = await ethers.getContractFactory("ERC1967Proxy");
+    const initData = ShareTokenFactory.interface.encodeFunctionData(
+      "initialize",
+      [
+        "Solar Panel Share 1",
+        "SPS1",
+        await solarPanelRegistry.getAddress(),
+        panelId
+      ]
+    );
+    
+    const shareTokenProxy = await ShareTokenProxyFactory.deploy(
+      await shareTokenImpl.getAddress(),
+      initData
+    );
+    await shareTokenProxy.waitForDeployment();
+    
+    // Get the share token instance
+    shareToken = await ethers.getContractAt("ShareToken", await shareTokenProxy.getAddress());
+    
+    // Link the share token to the panel
+    await solarPanelRegistry.linkShareToken(panelId, await shareToken.getAddress());
+    
+    // Grant MINTER_ROLE to owner
+    await shareToken.grantRole(MINTER_ROLE, owner.address);
+    
+    // Mint tokens directly to owner
+    await shareToken.mintShares(totalShares, owner.address);
+    
+    // Transfer some shares to users
+    await shareToken.transfer(user1.address, user1Shares);
+    await shareToken.transfer(user2.address, user2Shares);
     
     // Deploy DividendDistributor using upgrades.deployProxy
     const DividendDistributorFactory = await ethers.getContractFactory("DividendDistributor");
@@ -119,7 +122,6 @@ describe("DividendDistributor", function () {
     await dividendDistributor.waitForDeployment();
     
     // Grant roles
-    await solarPanelRegistry.grantRole(FACTORY_ROLE, owner.address);
     await solarPanelRegistry.grantRole(ADMIN_ROLE, owner.address);
     await shareToken.grantRole(MINTER_ROLE, owner.address);
     await dividendDistributor.grantRole(DISTRIBUTOR_ROLE, owner.address);

@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
-import { SolarPanelRegistry, SolarPanelFactory, ShareToken, TokenSale } from "../typechain-types";
+import { SolarPanelRegistry, SolarPanelFactory, ShareToken, TokenSale, MockERC20 } from "../typechain-types";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { Log, ContractTransactionReceipt } from "ethers";
 
@@ -10,6 +10,7 @@ describe("TokenSale", function () {
   let investor2: HardhatEthersSigner;
   let registry: SolarPanelRegistry;
   let factory: SolarPanelFactory;
+  let usdcToken: MockERC20;
 
   beforeEach(async function () {
     // Deploy contracts
@@ -20,9 +21,18 @@ describe("TokenSale", function () {
     registry = await upgrades.deployProxy(SolarPanelRegistry, [], { initializer: "initialize", kind: "uups" }) as unknown as SolarPanelRegistry;
     await registry.waitForDeployment();
 
+    // Deploy Mock USDC token
+    const MockERC20Factory = await ethers.getContractFactory("MockERC20");
+    usdcToken = await upgrades.deployProxy(MockERC20Factory, ["USD Coin", "USDC"], { initializer: "initialize", kind: "uups" }) as unknown as MockERC20;
+    await usdcToken.waitForDeployment();
+    
+    // Mint USDC to investors for testing
+    await usdcToken.mint(investor1.address, ethers.parseEther("1000"));
+    await usdcToken.mint(investor2.address, ethers.parseEther("1000"));
+
     // Deploy Factory
     const SolarPanelFactory = await ethers.getContractFactory("SolarPanelFactory");
-    factory = await upgrades.deployProxy(SolarPanelFactory, [await registry.getAddress()], { initializer: "initialize", kind: "uups" }) as unknown as SolarPanelFactory;
+    factory = await upgrades.deployProxy(SolarPanelFactory, [await registry.getAddress(), await usdcToken.getAddress()], { initializer: "initialize", kind: "uups" }) as unknown as SolarPanelFactory;
     await factory.waitForDeployment();
 
     // Grant FACTORY_ROLE to Factory
@@ -35,31 +45,33 @@ describe("TokenSale", function () {
     await factory.grantRole(await factory.REGISTRAR_ROLE(), owner.address);
   });
 
-  it("Should create a panel with shares without token sale", async function () {
-    // Create panel with shares only
+
+  it("Should create a panel with shares and token sale", async function () {
+    // Create panel with shares with sale
     const externalId = "PANEL123";
     const tokenName = "Solar Share";
     const tokenSymbol = "SOLAR";
-    const totalShares = ethers.parseEther("1000"); // 1000 tokens
     const capacity = 5000; // 5kW
+    const totalShares = ethers.parseEther("1000"); // 1000 tokens
+    const tokenPrice = ethers.parseUnits("1", "finney"); // Need non-zero price due to contract validation
+    const saleEndTime = Math.floor(Date.now() / 1000) + 86400; // Need future time due to contract validation
 
     const tx = await factory.createPanelWithShares(
       externalId,
       tokenName,
       tokenSymbol,
-      totalShares,
       capacity,
-      0, // tokensForSale
-      0, // tokenPrice
-      0  // saleEndTime
+      totalShares,
+      tokenPrice,
+      saleEndTime,
+      ethers.ZeroAddress // payment token (use default)
     );
 
     const receipt = await tx.wait();
     if (!receipt) throw new Error("Transaction failed");
     
-    // In ethers v6, logs is an array without event information
-    // We need to parse each log to find our events
-    const events = receipt.logs.filter((log: Log) => {
+    // Parse panels event
+    const panelEvents = receipt.logs.filter((log: Log) => {
       try {
         const parsed = factory.interface.parseLog(log);
         return parsed && parsed.name === 'PanelAndSharesCreated';
@@ -67,29 +79,47 @@ describe("TokenSale", function () {
         return false;
       }
     });
-
-    expect(events.length).to.be.greaterThan(0, "No PanelAndSharesCreated event found");
-    const parsedEvent = factory.interface.parseLog(events[0]);
-    if (!parsedEvent) throw new Error("Failed to parse PanelAndSharesCreated event");
-    const [panelId, shareTokenAddress] = parsedEvent.args;
-
+    
+    expect(panelEvents.length).to.be.greaterThan(0, "No PanelAndSharesCreated event found");
+    const parsedPanelEvent = factory.interface.parseLog(panelEvents[0]);
+    if (!parsedPanelEvent) throw new Error("Failed to parse PanelAndSharesCreated event");
+    const [panelId, shareTokenAddress] = parsedPanelEvent.args;
+    
     // Get the token instance
     const shareToken = await ethers.getContractAt("ShareToken", shareTokenAddress);
 
     // Verify token setup
     expect(await shareToken.name()).to.equal(tokenName);
     expect(await shareToken.symbol()).to.equal(tokenSymbol);
-    expect(await shareToken.balanceOf(owner.address)).to.equal(totalShares); // All tokens with owner
+    
+    // Verify sale was created by checking for TokenSaleCreated event
+    const saleEvents = receipt.logs.filter((log: Log) => {
+      try {
+        const parsed = factory.interface.parseLog(log);
+        return parsed && parsed.name === 'TokenSaleCreated';
+      } catch (e) {
+        return false;
+      }
+    });
+    expect(saleEvents.length).to.be.greaterThan(0, "No TokenSaleCreated event found when sale should be created");
+    
+    // Verify tokens were transferred to the sale contract not the owner
+    const parsedSaleEvent = factory.interface.parseLog(saleEvents[0]);
+    if (!parsedSaleEvent) throw new Error("Failed to parse TokenSaleCreated event");
+    const [, saleContractAddress] = parsedSaleEvent.args;
+    
+    // Owner shouldn't have tokens directly, they should be in the sale contract
+    expect(await shareToken.balanceOf(owner.address)).to.equal(0);
+    expect(await shareToken.balanceOf(saleContractAddress)).to.equal(totalShares);
   });
 
-  it("Should create a panel with shares and token sale in one transaction", async function () {
+  it("Should create a panel with shares and token sale with detailed verification", async function () {
     // Create panel with shares and integrated token sale
-    const externalId = "PANEL123";
-    const tokenName = "Solar Share";
-    const tokenSymbol = "SOLAR";
-    const totalShares = ethers.parseEther("1000"); // 1000 tokens
+    const externalId = "PANEL124";
+    const tokenName = "Solar Share 2";
+    const tokenSymbol = "SOLAR2";
     const capacity = 5000; // 5kW
-    const tokensForSale = ethers.parseEther("500"); // 500 tokens for sale
+    const totalShares = ethers.parseEther("1000"); // 1000 tokens
     const price = ethers.parseUnits("1", "finney"); // 0.001 ETH per token (1 finney = 0.001 ETH)
     const saleEndTime = Math.floor(Date.now() / 1000) + 86400; // 1 day from now
 
@@ -98,11 +128,11 @@ describe("TokenSale", function () {
       externalId,
       tokenName,
       tokenSymbol,
-      totalShares,
       capacity,
-      tokensForSale,
+      totalShares,
       price,
-      saleEndTime
+      saleEndTime,
+      ethers.ZeroAddress // payment token (use default)
     );
 
     const receipt = await tx.wait();
@@ -156,6 +186,7 @@ describe("TokenSale", function () {
     expect(await tokenSale.price()).to.equal(price);
     expect(await tokenSale.saleEndTime()).to.be.closeTo(BigInt(saleEndTime), BigInt(10)); // Allow some variation
     expect(await tokenSale.isSaleActive()).to.equal(true);
+    expect(await tokenSale.paymentToken()).to.equal(await usdcToken.getAddress());
   });
 
   it("Should verify sale contract is properly linked in the registry", async function () {
@@ -166,7 +197,7 @@ describe("TokenSale", function () {
     const totalShares = ethers.parseEther("1000");
     const capacity = 5000;
     const tokensForSale = ethers.parseEther("500");
-    const price = ethers.parseEther("0.01");
+    const price = ethers.parseUnits("1", "finney");
     const saleEndTime = Math.floor(Date.now() / 1000) + 86400;
 
     // Create panel with shares and token sale
@@ -174,11 +205,11 @@ describe("TokenSale", function () {
       externalId,
       tokenName,
       tokenSymbol,
-      totalShares,
       capacity,
-      tokensForSale,
+      totalShares,
       price,
-      saleEndTime
+      saleEndTime,
+      ethers.ZeroAddress // payment token (use default)
     );
 
     const receipt = await tx.wait();
@@ -227,12 +258,11 @@ describe("TokenSale", function () {
 
   it("Should allow investors to purchase tokens from the integrated sale", async function () {
     // Create panel with shares and integrated token sale
-    const externalId = "PANEL123";
+    const externalId = "PANEL125";
     const tokenName = "Solar Share";
     const tokenSymbol = "SOLAR";
     const totalShares = ethers.parseEther("1000"); // 1000 tokens
     const capacity = 5000; // 5kW
-    const tokensForSale = ethers.parseEther("500"); // 500 tokens for sale
     const price = ethers.parseUnits("1", "finney"); // 0.001 ETH per token (1 finney = 0.001 ETH)
     const saleEndTime = Math.floor(Date.now() / 1000) + 86400; // 1 day from now
 
@@ -240,11 +270,11 @@ describe("TokenSale", function () {
       externalId,
       tokenName,
       tokenSymbol,
-      totalShares,
       capacity,
-      tokensForSale,
+      totalShares,
       price,
-      saleEndTime
+      saleEndTime,
+      await usdcToken.getAddress() // Use USDC as payment token explicitly
     );
 
     const receipt = await tx.wait();
@@ -260,54 +290,101 @@ describe("TokenSale", function () {
       }
     });
     
+    expect(saleEvents.length).to.be.greaterThan(0, "No TokenSaleCreated event found");
     const parsedSaleEvent = factory.interface.parseLog(saleEvents[0]);
     if (!parsedSaleEvent) throw new Error("Failed to parse TokenSaleCreated event");
+    
+    // Get event parameters
     const [shareTokenAddress, saleContractAddress] = parsedSaleEvent.args;
 
     // Get the token and sale contract instances
     const shareToken = await ethers.getContractAt("ShareToken", shareTokenAddress);
     const tokenSale = await ethers.getContractAt("TokenSale", saleContractAddress);
 
-    // Initial balances
-    const initialInvestor1Balance = await ethers.provider.getBalance(investor1.address);
-    const initialContractBalance = await ethers.provider.getBalance(await tokenSale.getAddress());
+    // Get the payment token address directly from the sale contract
+    const paymentTokenAddress = await tokenSale.paymentToken();
+    const paymentToken = await ethers.getContractAt("MockERC20", paymentTokenAddress);
     
-    // Investor1 purchases 10 tokens
-    const purchaseAmount = ethers.parseEther("1"); // Buy 1 token instead of 10
-    const paymentAmount = purchaseAmount * price / ethers.parseEther("1");
+    // Make sure investor1 has enough USDC - use fresh minting
+    await usdcToken.mint(investor1.address, ethers.parseEther("2000"));
     
-    await tokenSale.connect(investor1).purchaseTokens(purchaseAmount, { value: paymentAmount });
+    // Calculate payment amount - use 1 as the amount (not 1e18) since contract multiplies by price directly
+    const purchaseAmount = 1n; // Buy 1 token (without 18 decimals)
+    const tokenPrice = await tokenSale.price();
+    const paymentAmount = purchaseAmount * tokenPrice; // Direct multiplication as per contract
+    
+    // Log debugging information
+    console.log(`Purchase Amount: ${purchaseAmount}, Token Price: ${tokenPrice}, Payment Amount: ${paymentAmount}`);
+    console.log(`Investor USDC Balance: ${await usdcToken.balanceOf(investor1.address)}`);
+    console.log(`Sale Contract Payment Token: ${paymentTokenAddress}`);
+    console.log(`USDC Token Address: ${await usdcToken.getAddress()}`);
+    
+    // Check if the payment token addresses match
+    expect(paymentTokenAddress).to.equal(await usdcToken.getAddress(), 
+      "Payment token address mismatch - make sure the addresses match exactly");
+    
+    // Ensure investor has a balance
+    const investorBalance = await usdcToken.balanceOf(investor1.address);
+    expect(investorBalance).to.be.gt(0, "Investor has no USDC balance");
+    expect(investorBalance).to.be.gte(paymentAmount, "Investor has insufficient USDC balance");
+    
+    // Clear any existing allowance (helpful if test is rerun)
+    await usdcToken.connect(investor1).approve(paymentTokenAddress, 0);
+    
+    // Explicitly approve the sale contract to spend USDC
+    const approvalTx = await usdcToken.connect(investor1).approve(saleContractAddress, paymentAmount);
+    await approvalTx.wait();
+    
+    // Verify allowance
+    const allowance = await usdcToken.allowance(investor1.address, saleContractAddress);
+    console.log(`Allowance: ${allowance}, Required: ${paymentAmount}`);
+    expect(allowance).to.be.gte(paymentAmount, "Allowance not set correctly");
+    
+    // Record starting balances
+    const initialInvestorShareBalance = await shareToken.balanceOf(investor1.address);
+    const initialInvestorUSDCBalance = await usdcToken.balanceOf(investor1.address);
+    const initialContractShareBalance = await shareToken.balanceOf(saleContractAddress);
+    const initialContractUSDCBalance = await usdcToken.balanceOf(saleContractAddress);
+    
+    // Purchase tokens
+    const purchaseTx = await tokenSale.connect(investor1).purchaseTokens(purchaseAmount);
+    await purchaseTx.wait();
     
     // Check token balances after purchase
-    expect(await shareToken.balanceOf(investor1.address)).to.equal(purchaseAmount);
+    const finalInvestorShareBalance = await shareToken.balanceOf(investor1.address);
+    const finalInvestorUSDCBalance = await usdcToken.balanceOf(investor1.address);
+    const finalContractShareBalance = await shareToken.balanceOf(saleContractAddress);
+    const finalContractUSDCBalance = await usdcToken.balanceOf(saleContractAddress);
+    
+    // Verify balances changed properly
+    expect(finalInvestorShareBalance).to.equal(initialInvestorShareBalance + purchaseAmount);
+    expect(finalInvestorUSDCBalance).to.equal(initialInvestorUSDCBalance - paymentAmount);
+    expect(finalContractShareBalance).to.equal(initialContractShareBalance - purchaseAmount);
+    expect(finalContractUSDCBalance).to.equal(initialContractUSDCBalance + paymentAmount);
     
     // Check contract state
     expect(await tokenSale.soldTokens()).to.equal(purchaseAmount);
-    
-    // Check ETH balances
-    expect(await ethers.provider.getBalance(await tokenSale.getAddress())).to.equal(initialContractBalance + paymentAmount);
   });
 
   it("Should allow owner to withdraw funds", async function () {
     // Create panel with integrated token sale
-    const externalId = "PANEL123";
+    const externalId = "PANEL126";
     const tokenName = "Solar Share";
     const tokenSymbol = "SOLAR";
     const totalShares = ethers.parseEther("1000");
     const capacity = 5000;
-    const tokensForSale = ethers.parseEther("500");
-    const price = ethers.parseEther("0.01");
+    const price = ethers.parseUnits("1", "finney");
     const saleEndTime = Math.floor(Date.now() / 1000) + 86400;
 
     const tx = await factory.createPanelWithShares(
       externalId,
       tokenName,
       tokenSymbol,
-      totalShares,
       capacity,
-      tokensForSale,
+      totalShares,
       price,
-      saleEndTime
+      saleEndTime,
+      await usdcToken.getAddress() // Use USDC as payment token explicitly
     );
 
     const receipt = await tx.wait();
@@ -322,46 +399,122 @@ describe("TokenSale", function () {
       }
     });
     
+    expect(saleEvents.length).to.be.greaterThan(0, "No TokenSaleCreated event found");
     const parsedSaleEvent = factory.interface.parseLog(saleEvents[0]);
     if (!parsedSaleEvent) throw new Error("Failed to parse TokenSaleCreated event");
+    
+    // Get event parameters
     const [shareTokenAddress, saleContractAddress] = parsedSaleEvent.args;
 
     // Get the token and sale contract instances
     const shareToken = await ethers.getContractAt("ShareToken", shareTokenAddress);
     const tokenSale = await ethers.getContractAt("TokenSale", saleContractAddress);
+    
+    // Get the payment token from the sale contract
+    const paymentTokenAddress = await tokenSale.paymentToken();
+    expect(paymentTokenAddress).to.equal(await usdcToken.getAddress(), 
+      "Payment token address mismatch");
 
-    // Investor purchases 50 tokens
-    const purchaseAmount = ethers.parseEther("2"); // Buy 2 tokens instead of 50
-    const paymentAmount = purchaseAmount * price / ethers.parseEther("1");
+    // Ensure investor1 has enough USDC
+    await usdcToken.mint(investor1.address, ethers.parseEther("2000"));
     
-    await tokenSale.connect(investor1).purchaseTokens(purchaseAmount, { value: paymentAmount });
+    // Investor purchases tokens - use correct decimal scaling
+    const purchaseAmount = 2n; // Buy 2 tokens (without 18 decimals)
+    const tokenPrice = await tokenSale.price();
+    const paymentAmount = purchaseAmount * tokenPrice; // Direct multiplication as per contract
     
-    // Initial contract balance
-    const contractBalance = await ethers.provider.getBalance(await tokenSale.getAddress());
-    expect(contractBalance).to.equal(paymentAmount);
+    // Approve the sale contract to spend USDC
+    await usdcToken.connect(investor1).approve(saleContractAddress, paymentAmount);
     
-    // Initial owner balance
-    const initialOwnerBalance = await ethers.provider.getBalance(owner.address);
+    // Verify allowance
+    const allowance = await usdcToken.allowance(investor1.address, saleContractAddress);
+    expect(allowance).to.be.gte(paymentAmount, "Allowance not set correctly");
+    
+    // Record initial balances
+    const initialOwnerUSDCBalance = await usdcToken.balanceOf(owner.address);
+    
+    // Purchase tokens
+    await tokenSale.connect(investor1).purchaseTokens(purchaseAmount);
+    
+    // Verify the contract now has funds
+    const contractUSDCBalance = await usdcToken.balanceOf(saleContractAddress);
+    expect(contractUSDCBalance).to.equal(paymentAmount);
     
     // Owner withdraws funds
-    const withdrawTx = await tokenSale.connect(owner).withdrawFunds(owner.address);
-    const withdrawReceipt = await withdrawTx.wait();
-    if (!withdrawReceipt) throw new Error("Withdrawal transaction failed");
-    
-    // Calculate gas costs
-    const gasUsed = withdrawReceipt.gasUsed;
-    const gasPrice = withdrawTx.gasPrice || 0n;
-    const gasCost = gasUsed * gasPrice;
+    await tokenSale.connect(owner).withdrawFunds(owner.address);
     
     // Check balances after withdrawal
-    expect(await ethers.provider.getBalance(await tokenSale.getAddress())).to.equal(0n);
+    const finalContractUSDCBalance = await usdcToken.balanceOf(saleContractAddress);
+    const finalOwnerUSDCBalance = await usdcToken.balanceOf(owner.address);
     
-    // Owner should have received the contract balance minus gas costs
-    const expectedBalance = initialOwnerBalance + contractBalance - gasCost;
-    const actualBalance = await ethers.provider.getBalance(owner.address);
+    expect(finalContractUSDCBalance).to.equal(0);
+    expect(finalOwnerUSDCBalance).to.equal(initialOwnerUSDCBalance + contractUSDCBalance);
+  });
+
+  it("Should create a panel with shares and validate share balances", async function () {
+    // Create panel with shares and integrated token sale
+    const externalId = "PANEL123";
+    const tokenName = "Solar Share";
+    const tokenSymbol = "SOLAR";
+    const capacity = 5000; // 5kW
+    const totalShares = ethers.parseEther("1000"); // 1000 tokens
+    const tokenPrice = ethers.parseUnits("1", "finney"); // Need non-zero price due to contract validation
+    const saleEndTime = Math.floor(Date.now() / 1000) + 86400; // Need future time due to contract validation
+
+    const tx = await factory.createPanelWithShares(
+      externalId,
+      tokenName,
+      tokenSymbol,
+      capacity,
+      totalShares,
+      tokenPrice,
+      saleEndTime,
+      ethers.ZeroAddress // payment token (use default)
+    );
+
+    const receipt = await tx.wait();
+    if (!receipt) throw new Error("Transaction failed");
     
-    // Allow for a small margin of error due to gas estimation
-    const margin = ethers.parseEther("0.001");
-    expect(actualBalance).to.be.closeTo(expectedBalance, margin);
+    // Parse panels event
+    const panelEvents = receipt.logs.filter((log: Log) => {
+      try {
+        const parsed = factory.interface.parseLog(log);
+        return parsed && parsed.name === 'PanelAndSharesCreated';
+      } catch (e) {
+        return false;
+      }
+    });
+    
+    expect(panelEvents.length).to.be.greaterThan(0, "No PanelAndSharesCreated event found");
+    const parsedPanelEvent = factory.interface.parseLog(panelEvents[0]);
+    if (!parsedPanelEvent) throw new Error("Failed to parse PanelAndSharesCreated event");
+    const [panelId, shareTokenAddress] = parsedPanelEvent.args;
+    
+    // Get the token instance
+    const shareToken = await ethers.getContractAt("ShareToken", shareTokenAddress);
+
+    // Verify token setup
+    expect(await shareToken.name()).to.equal(tokenName);
+    expect(await shareToken.symbol()).to.equal(tokenSymbol);
+    
+    // Verify sale was created by checking for TokenSaleCreated event
+    const saleEvents = receipt.logs.filter((log: Log) => {
+      try {
+        const parsed = factory.interface.parseLog(log);
+        return parsed && parsed.name === 'TokenSaleCreated';
+      } catch (e) {
+        return false;
+      }
+    });
+    expect(saleEvents.length).to.be.greaterThan(0, "No TokenSaleCreated event found when sale should be created");
+    
+    // Verify tokens were transferred to the sale contract not the owner
+    const parsedSaleEvent = factory.interface.parseLog(saleEvents[0]);
+    if (!parsedSaleEvent) throw new Error("Failed to parse TokenSaleCreated event");
+    const [, saleContractAddress] = parsedSaleEvent.args;
+    
+    // Owner shouldn't have tokens directly, they should be in the sale contract
+    expect(await shareToken.balanceOf(owner.address)).to.equal(0);
+    expect(await shareToken.balanceOf(saleContractAddress)).to.equal(totalShares);
   });
 }); 

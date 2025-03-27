@@ -7,6 +7,7 @@ describe("SolarPanelFactory", function () {
   // Using any type here temporarily to fix the immediate issue
   let solarPanelRegistry: any;
   let solarPanelFactory: any;
+  let mockUSDC: any;
   let owner: Signer;
   let user1: Signer;
   let user2: Signer;
@@ -17,6 +18,8 @@ describe("SolarPanelFactory", function () {
   // We'll keep this for using as capacity parameter in createPanelWithShares
   const panelCapacity = ethers.parseEther("0.1");
   const totalShares = ethers.parseEther("1000");
+  const tokenPrice = ethers.parseEther("0.1"); // Adding token price
+  const saleEndTime = Math.floor(Date.now() / 1000) + 86400; // 24 hours from now
 
   beforeEach(async function () {
     [owner, user1, user2] = await ethers.getSigners();
@@ -30,11 +33,20 @@ describe("SolarPanelFactory", function () {
     );
     await solarPanelRegistry.waitForDeployment();
 
+    // Deploy MockERC20 (USDC) for payment
+    const MockERC20Factory = await ethers.getContractFactory("MockERC20");
+    mockUSDC = await upgrades.deployProxy(
+      MockERC20Factory,
+      ["USD Coin", "USDC"],
+      { initializer: "initialize", kind: "uups" }
+    );
+    await mockUSDC.waitForDeployment();
+
     // Deploy SolarPanelFactory using upgrades.deployProxy
     const SolarPanelFactoryFactory = await ethers.getContractFactory("SolarPanelFactory");
     solarPanelFactory = await upgrades.deployProxy(
       SolarPanelFactoryFactory,
-      [await solarPanelRegistry.getAddress()],
+      [await solarPanelRegistry.getAddress(), await mockUSDC.getAddress()],
       { initializer: "initialize", kind: "uups" }
     );
     await solarPanelFactory.waitForDeployment();
@@ -59,6 +71,10 @@ describe("SolarPanelFactory", function () {
     it("Should set the right registry address in factory", async function () {
       expect(await solarPanelFactory.registry()).to.equal(await solarPanelRegistry.getAddress());
     });
+
+    it("Should set the right default payment token", async function () {
+      expect(await solarPanelFactory.defaultPaymentToken()).to.equal(await mockUSDC.getAddress());
+    });
   });
 
   describe("Access Control", function () {
@@ -69,11 +85,11 @@ describe("SolarPanelFactory", function () {
           "TEST001",
           "Test Panel Token",
           "TPT",
-          totalShares,
           panelCapacity, // capacity
-          0, // tokensForSale
-          0, // tokenPrice
-          0  // saleEndTime
+          totalShares, // totalShares
+          tokenPrice, // tokenPrice
+          saleEndTime,  // saleEndTime
+          ethers.ZeroAddress // payment token (use default)
         )
       ).to.be.revertedWith("AccessControl: account " + user1Address.toLowerCase() + " is missing role " + REGISTRAR_ROLE);
     });
@@ -86,11 +102,11 @@ describe("SolarPanelFactory", function () {
           "TEST001",
           "Test Panel Token",
           "TPT",
-          totalShares,
           panelCapacity, // capacity
-          0, // tokensForSale
-          0, // tokenPrice
-          0  // saleEndTime
+          totalShares, // totalShares
+          tokenPrice, // tokenPrice
+          saleEndTime,  // saleEndTime
+          ethers.ZeroAddress // payment token (use default)
         )
       ).to.be.revertedWith("Pausable: paused");
       
@@ -100,11 +116,11 @@ describe("SolarPanelFactory", function () {
         "TEST001",
         "Test Panel Token",
         "TPT",
-        totalShares,
         panelCapacity, // capacity
-        0, // tokensForSale
-        0, // tokenPrice
-        0  // saleEndTime
+        totalShares, // totalShares
+        tokenPrice, // tokenPrice
+        saleEndTime,  // saleEndTime
+        ethers.ZeroAddress // payment token (use default)
       );
     });
 
