@@ -1,5 +1,5 @@
-import { run } from "hardhat";
-import * as dotenv from "dotenv";
+const { run } = require("hardhat");
+const dotenv = require("dotenv");
 
 dotenv.config();
 
@@ -7,14 +7,14 @@ dotenv.config();
  * Script to verify a contract on Etherscan
  * Usage: 
  * 1. Set the contract address and constructor arguments in .env file or pass them as command line arguments
- * 2. Run: npx hardhat run scripts/verify-contract.ts --network <network-name>
+ * 2. Run: npx hardhat run scripts/verify-contract.js --network <network-name>
  * 
  * Example .env entries:
  * CONTRACT_ADDRESS=0x123...
  * CONSTRUCTOR_ARGS=["0x456...", "Token Name", 18]
  * 
  * Or run with command line args:
- * npx hardhat run scripts/verify-contract.ts --network polygon --address 0x123... --args '["0x456...", "Token Name", 18]'
+ * npx hardhat run scripts/verify-contract.js --network polygon --address 0x123... --args '["0x456...", "Token Name", 18]'
  */
 async function main() {
   // Get contract address from .env or command line
@@ -34,7 +34,7 @@ async function main() {
   }
 
   // Get constructor arguments from .env or command line
-  let constructorArgs: any[] = [];
+  let constructorArgs = [];
   let argsString = process.env.CONSTRUCTOR_ARGS;
   
   for (let i = 0; i < args.length; i++) {
@@ -62,7 +62,7 @@ async function main() {
       constructorArguments: constructorArgs,
     });
     console.log("Contract verified successfully");
-  } catch (error: any) {
+  } catch (error) {
     if (error.message.includes("Already Verified")) {
       console.log("Contract is already verified");
     } else {

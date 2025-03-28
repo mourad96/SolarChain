@@ -36,7 +36,8 @@ const config: HardhatUserConfig = {
   networks: {
     hardhat: {
       chainId: 1337,
-      allowUnlimitedContractSize: true
+      allowUnlimitedContractSize: true,
+      accounts
     },
     sepolia: {
       url: process.env.SEPOLIA_URL || "",

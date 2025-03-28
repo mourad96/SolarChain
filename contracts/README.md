@@ -106,23 +106,16 @@ MIT
 
 | Contract | Address | Implementation |
 |----------|---------|----------------|
-| SolarPanelRegistry | [0x8ed1f4a51Da65eeE69C485630C82c612DfF76D64](https://amoy.polygonscan.com/address/0x8ed1f4a51Da65eeE69C485630C82c612DfF76D64) | [View](https://amoy.polygonscan.com/address/0xF8AFf87CEEA1025359752931B55134CEc793a5d5) |
-| SolarPanelFactory | [0x0226575805F212062812CBeB87B522602261F868](https://amoy.polygonscan.com/address/0x0226575805F212062812CBeB87B522602261F868) | [View](https://amoy.polygonscan.com/address/0x7B04b56E92F79076EDB336fE73CE5D0A7A26EbdC) |
-| ShareToken | [0xA26A20bD47ea07a56Ad8Ab3D35DBd9f1b51c8E4E](https://amoy.polygonscan.com/address/0xA26A20bD47ea07a56Ad8Ab3D35DBd9f1b51c8E4E) | [View](https://amoy.polygonscan.com/address/0x8805756688A997AC8eD3439394fb17B989f229B5) |
-| DividendDistributor | [0x98B5f53AB2C14d2E1Fa2C6004805058C09EB8189](https://amoy.polygonscan.com/address/0x98B5f53AB2C14d2E1Fa2C6004805058C09EB8189) | [View](https://amoy.polygonscan.com/address/0xC6538A1175Ae559475F8ECeA9225BF14E0e49774) |
+| SolarPanelRegistry | [0x8ed1f4a51Da65eeE69C485630C82c612DfF76D64](https://amoy.polygonscan.com/address/0x8ed1f4a51Da65eeE69C485630C82c612DfF76D64) | [View](https://amoy.polygonscan.com/address/unknown) |
+| SolarPanelFactory | [0x0226575805F212062812CBeB87B522602261F868](https://amoy.polygonscan.com/address/0x0226575805F212062812CBeB87B522602261F868) | [View](https://amoy.polygonscan.com/address/unknown) |
+| ShareToken | [0xA26A20bD47ea07a56Ad8Ab3D35DBd9f1b51c8E4E](https://amoy.polygonscan.com/address/0xA26A20bD47ea07a56Ad8Ab3D35DBd9f1b51c8E4E) | [View](https://amoy.polygonscan.com/address/unknown) |
+| DividendDistributor | [0x98B5f53AB2C14d2E1Fa2C6004805058C09EB8189](https://amoy.polygonscan.com/address/0x98B5f53AB2C14d2E1Fa2C6004805058C09EB8189) | [View](https://amoy.polygonscan.com/address/unknown) |
+| TokenSale | [undefined](https://amoy.polygonscan.com/address/undefined) | [View](https://amoy.polygonscan.com/address/unknown) |
 | MockERC20 (USDC) | [0xe3Ee77DAAa2214fFEE5f9B04DEB9F3126003a9be](https://amoy.polygonscan.com/address/0xe3Ee77DAAa2214fFEE5f9B04DEB9F3126003a9be) | N/A |
 
 > Note: These contracts are upgradeable using the UUPS proxy pattern. The proxy address is the address you interact with, while the implementation address contains the actual logic.
 
-Last deployed: 2025-03-17T14:52:12.698Z
-
-# Solar Energy Tokenization Platform
-
-This project implements a tokenization platform for solar panels, allowing:
-1. Registration of solar panels
-2. Creation of ERC-20 tokens representing shares in each panel
-3. Sale of these tokens to investors
-
+Last deployed: 2025-03-28T00:23:04.923Z
 ## Contract Structure
 
 ### Core Contracts
@@ -188,7 +181,7 @@ const result = await factory.createPanelWithShares(
   "PANEL123",                          // External ID
   "Solar Share",                       // Token name
   "SOLAR",                             // Token symbol
-  ethers.utils.parseEther("1000"),     // Total shares (1000 tokens)
+  1000,                                // Total shares (1000 tokens)
   5000,                                // Capacity (5kW)
   ethers.utils.parseEther("500"),      // Tokens for sale (500 tokens) - Set to 0 to skip sale creation
   ethers.utils.parseEther("0.01"),     // Price (0.01 ETH per token)
@@ -303,3 +296,19 @@ The sale owner can:
 - Role-based access control restricts administrative functions
 - The contract includes checks to prevent common errors (e.g., incorrect payment amounts)
 - All contracts are upgradeable using the UUPS proxy pattern
+
+
+## Deployed Contracts (Hardhat Local)
+
+| Contract | Address | Implementation |
+|----------|---------|----------------|
+| SolarPanelRegistry | `0x45a835463E69ee9B45EF0af4B834033e981B6CA2` | `unknown` |
+| SolarPanelFactory | `0x25093CaCA0d823dB26C1707fed2063062722742B` | `unknown` |
+| ShareToken | `0x8f5BB8f4069e1834C26a79eFDba9565DDCB11B44` | `unknown` |
+| DividendDistributor | `0xD4914E6E3E9e4A977313d2A0cd4C75D1A4F99D6c` | `unknown` |
+| TokenSale | `0x6E60422988997f0103f800fc608D32ee5f2611C4` | `unknown` |
+| MockERC20 (USDC) | `0xc963fcEAc3785a2604d0f12832465d87a49df9ae` | N/A |
+
+> Note: These contracts are upgradeable using the UUPS proxy pattern. The proxy address is the address you interact with, while the implementation address contains the actual logic.
+
+Last deployed: 2025-03-28T00:29:48.763Z

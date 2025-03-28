@@ -26,8 +26,7 @@ async function main() {
   // Deploy SolarPanelRegistry (upgradeable)
   console.log("Deploying SolarPanelRegistry...");
   const SolarPanelRegistry = await ethers.getContractFactory("SolarPanelRegistry");
-  const minimumPanelCapacity = ethers.parseEther("0.1"); // Example minimum capacity
-  const registry = await upgrades.deployProxy(SolarPanelRegistry, [minimumPanelCapacity], {
+  const registry = await upgrades.deployProxy(SolarPanelRegistry, [], {
     initializer: "initialize",
     kind: "uups",
   });
@@ -35,29 +34,7 @@ async function main() {
   const registryAddress = await registry.getAddress();
   console.log(`SolarPanelRegistry deployed to: ${registryAddress}`);
 
-  // Deploy SolarPanelFactory (upgradeable)
-  console.log("Deploying SolarPanelFactory...");
-  const SolarPanelFactory = await ethers.getContractFactory("SolarPanelFactory");
-  const factory = await upgrades.deployProxy(
-    SolarPanelFactory,
-    [registryAddress],
-    {
-      initializer: "initialize",
-      kind: "uups",
-    }
-  );
-  await factory.waitForDeployment();
-  const factoryAddress = await factory.getAddress();
-  console.log(`SolarPanelFactory deployed to: ${factoryAddress}`);
-
-  // Grant FACTORY_ROLE to the factory address in registry
-  console.log("Granting FACTORY_ROLE to factory in registry...");
-  const FACTORY_ROLE = await registry.FACTORY_ROLE();
-  const grantFactoryRoleTx = await registry.grantRole(FACTORY_ROLE, factoryAddress, overrides);
-  await grantFactoryRoleTx.wait();
-  console.log("FACTORY_ROLE granted to factory in registry");
-
-  // Deploy MockERC20 for dividend payments
+  // Deploy MockERC20 for dividend payments (needs to be deployed before Factory)
   console.log("Deploying MockERC20 (USDC)...");
   const MockERC20 = await ethers.getContractFactory("MockERC20");
   const paymentToken = await upgrades.deployProxy(
@@ -80,12 +57,50 @@ async function main() {
     console.log(`Minted ${ethers.formatUnits(mintAmount, 18)} USDC to deployer`);
   }
 
-  // Deploy ShareToken (upgradeable)
+  // Deploy SolarPanelFactory (upgradeable) - now with both required parameters
+  console.log("Deploying SolarPanelFactory...");
+  const SolarPanelFactory = await ethers.getContractFactory("SolarPanelFactory");
+  const factory = await upgrades.deployProxy(
+    SolarPanelFactory,
+    [registryAddress, paymentTokenAddress],
+    {
+      initializer: "initialize",
+      kind: "uups",
+    }
+  );
+  await factory.waitForDeployment();
+  const factoryAddress = await factory.getAddress();
+  console.log(`SolarPanelFactory deployed to: ${factoryAddress}`);
+
+  // Grant FACTORY_ROLE to the factory address in registry
+  console.log("Granting FACTORY_ROLE to factory in registry...");
+  const FACTORY_ROLE = await registry.FACTORY_ROLE();
+  const grantFactoryRoleTx = await registry.grantRole(FACTORY_ROLE, factoryAddress, overrides);
+  await grantFactoryRoleTx.wait();
+  console.log("FACTORY_ROLE granted to factory in registry");
+
+  // Register a test panel before deploying ShareToken
+  console.log("Registering a test panel...");
+  const externalId = "TEST-PANEL-001";
+  const capacity = ethers.parseEther("10"); // 10 kW capacity
+  
+  // Register the panel using the factory (since it now has the FACTORY_ROLE)
+  const registerPanelTx = await registry.registerPanelByFactory(
+    externalId,
+    capacity,
+    deployer.address,
+    overrides
+  );
+  await registerPanelTx.wait();
+  console.log("Test panel registered with ID: 1");
+
+  // Deploy ShareToken (upgradeable) - using the registered panel ID
   console.log("Deploying ShareToken...");
   const ShareToken = await ethers.getContractFactory("ShareToken");
+  const panelId = 1; // The first panel ID is 1
   const shareToken = await upgrades.deployProxy(
     ShareToken,
-    ["Solar Panel Share", "SPS", registryAddress, 1], // Using panel ID 1 for testing
+    ["Solar Panel Share", "SPS", registryAddress, panelId],
     {
       initializer: "initialize",
       kind: "uups",
@@ -94,6 +109,12 @@ async function main() {
   await shareToken.waitForDeployment();
   const shareTokenAddress = await shareToken.getAddress();
   console.log(`ShareToken deployed to: ${shareTokenAddress}`);
+  
+  // Link the share token to the panel in the registry
+  console.log("Linking ShareToken to panel...");
+  const linkShareTokenTx = await registry.linkShareToken(panelId, shareTokenAddress, overrides);
+  await linkShareTokenTx.wait();
+  console.log("ShareToken linked to panel");
 
   // Deploy DividendDistributor (upgradeable)
   console.log("Deploying DividendDistributor...");
@@ -109,6 +130,37 @@ async function main() {
   await dividendDistributor.waitForDeployment();
   const dividendDistributorAddress = await dividendDistributor.getAddress();
   console.log(`DividendDistributor deployed to: ${dividendDistributorAddress}`);
+
+  // Deploy TokenSale contract (upgradeable)
+  console.log("Deploying TokenSale...");
+  const TokenSale = await ethers.getContractFactory("TokenSale");
+  const totalShares = 1000n; // 1000 shares available for sale
+  const tokenPrice = ethers.parseUnits("10", 18); // 10 USDC per share
+  const saleEndTime = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 days from now
+  
+  const tokenSale = await upgrades.deployProxy(
+    TokenSale,
+    [
+      shareTokenAddress,
+      paymentTokenAddress,
+      totalShares,
+      tokenPrice,
+      saleEndTime
+    ],
+    {
+      initializer: "initialize",
+      kind: "uups",
+    }
+  );
+  await tokenSale.waitForDeployment();
+  const tokenSaleAddress = await tokenSale.getAddress();
+  console.log(`TokenSale deployed to: ${tokenSaleAddress}`);
+  
+  // Link the sale contract to the panel in the registry
+  console.log("Linking TokenSale to panel...");
+  const linkSaleContractTx = await registry.linkSaleContract(panelId, tokenSaleAddress, overrides);
+  await linkSaleContractTx.wait();
+  console.log("TokenSale linked to panel");
 
   // Setup roles
   console.log("Setting up roles...");
@@ -206,6 +258,17 @@ async function main() {
     } catch (error) {
       console.log("Error verifying DividendDistributor implementation:", error.message);
     }
+
+    try {
+      const tokenSaleImplementationAddress = await upgrades.erc1967.getImplementationAddress(tokenSaleAddress);
+      await run("verify:verify", {
+        address: tokenSaleImplementationAddress,
+        constructorArguments: [],
+      });
+      console.log("TokenSale implementation verified");
+    } catch (error) {
+      console.log("Error verifying TokenSale implementation:", error.message);
+    }
   }
 
   // Print deployment summary
@@ -216,7 +279,8 @@ async function main() {
     factory: factoryAddress,
     paymentToken: paymentTokenAddress,
     shareToken: shareTokenAddress,
-    dividendDistributor: dividendDistributorAddress
+    dividendDistributor: dividendDistributorAddress,
+    tokenSale: tokenSaleAddress
   });
   console.log("=========================\n");
 
@@ -226,7 +290,10 @@ async function main() {
     factory: factoryAddress,
     shareToken: shareTokenAddress,
     dividendDistributor: dividendDistributorAddress,
-    paymentToken: paymentTokenAddress
+    paymentToken: paymentTokenAddress,
+    tokenSale: tokenSaleAddress,
+    network: network.name,
+    timestamp: new Date().toISOString()
   };
   
   updateFiles(addresses);
