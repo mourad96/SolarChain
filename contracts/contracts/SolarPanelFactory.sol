@@ -9,6 +9,7 @@ import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "./SolarPanelRegistry.sol";
 import "./ShareToken.sol";
 import "./TokenSale.sol";
+//import "hardhat/console.sol";
 
 /**
  * @title SolarPanelFactory
@@ -120,7 +121,7 @@ contract SolarPanelFactory is
         require(bytes(tokenSymbol).length > 0, "Token symbol cannot be empty");
         require(totalShares > 0, "Total shares must be greater than 0");
         require(capacity > 0, "Capacity must be greater than 0");
-        
+        //console.log("createPanelWithShares");
         // Use default payment token if none specified
         address actualPaymentToken = paymentToken == address(0) ? defaultPaymentToken : paymentToken;
         
@@ -135,7 +136,7 @@ contract SolarPanelFactory is
         
         // Register panel and deploy token
         panelId = registry.registerPanelByFactory(externalId, capacity, msg.sender);
-        
+        //console.log("panelId", panelId);
         ShareToken implementation = new ShareToken();
         bytes memory initData = abi.encodeWithSelector(
             ShareToken(address(0)).initialize.selector,
@@ -146,15 +147,16 @@ contract SolarPanelFactory is
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
         ShareToken shareToken = ShareToken(address(proxy));
-        
+        //console.log("shareToken", address(shareToken));
         registry.linkShareToken(panelId, address(shareToken));
         shareToken.updatePanelMetadata(externalId);
-        
+        //console.log("shareToken initialized");
+        //console.log("createSale", createSale);
         // Create sale contract first if tokens for sale is greater than 0
         if (createSale) {
             // Create token sale contract
             TokenSale saleImplementation = new TokenSale();
-            
+            //console.log("saleImplementation", address(saleImplementation));
             // Initialize the sale proxy with initial data
             bytes memory saleInitData = abi.encodeWithSelector(
                 TokenSale(address(0)).initialize.selector,
@@ -164,10 +166,10 @@ contract SolarPanelFactory is
                 tokenPrice,
                 saleEndTime
             );
-            
+            //console.log("saleInitData", address(saleImplementation));
             ERC1967Proxy saleProxy = new ERC1967Proxy(address(saleImplementation), saleInitData);
             TokenSale tokenSale = TokenSale(address(saleProxy));
-            
+            //console.log("tokenSale", address(tokenSale));
             // Mint all shares directly to the sale contract
             shareToken.mintShares(totalShares, address(tokenSale));
             
@@ -175,7 +177,7 @@ contract SolarPanelFactory is
             tokenSale.grantRole(tokenSale.DEFAULT_ADMIN_ROLE(), msg.sender);
             tokenSale.grantRole(tokenSale.ADMIN_ROLE(), msg.sender);
             tokenSale.grantRole(tokenSale.SALE_MANAGER_ROLE(), msg.sender);
-            
+            //console.log("tokenSale roles granted");
             // Link the sale contract to the panel in the registry
             registry.linkSaleContract(panelId, address(tokenSale));
             
@@ -186,7 +188,7 @@ contract SolarPanelFactory is
                 totalShares,
                 saleEndTime
             );
-            
+            //console.log("tokenSale created");
             saleAddress = address(tokenSale);
         } else {
             // If no sale, mint all shares to the sender
@@ -198,9 +200,9 @@ contract SolarPanelFactory is
         shareToken.grantRole(shareToken.DEFAULT_ADMIN_ROLE(), msg.sender);
         shareToken.grantRole(shareToken.ADMIN_ROLE(), msg.sender);
         shareToken.grantRole(shareToken.MINTER_ROLE(), msg.sender);
-        
+        //console.log("shareToken roles granted");
         emit PanelAndSharesCreated(panelId, address(shareToken), msg.sender, externalId, totalShares, capacity);
-        
+        //console.log("panelAndSharesCreated");
         return (panelId, address(shareToken), saleAddress);
     }
     

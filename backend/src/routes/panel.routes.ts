@@ -2,6 +2,14 @@ import { Router } from 'express';
 import { body } from 'express-validator';
 import { requireAuth, requireOwner } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validate-request';
+import { 
+  registerPanel,
+  updatePanel,
+  getPanelDetails,
+  listPanels,
+  getUserPanels,
+  setPanelStatus
+} from '../controllers/panel.controller';
 import { PanelController } from '../controllers/panel.controller';
 
 const router = Router();
@@ -31,44 +39,21 @@ router.post(
       .withMessage('Total shares must be a positive integer'),
   ],
   validateRequest as any,
-  panelController.createPanel.bind(panelController)
-);
-
-// Create panels batch route
-router.post(
-  '/batch',
-  requireAuth as any,
-  [
-    body('panels').isArray().withMessage('Panels must be an array'),
-    body('panels.*.name').trim().notEmpty().withMessage('Name is required for all panels'),
-    body('panels.*.location').trim().notEmpty().withMessage('Location is required for all panels'),
-    body('panels.*.capacity')
-      .isFloat({ min: 0 })
-      .withMessage('Capacity must be a positive number for all panels'),
-  ],
-  validateRequest as any,
-  panelController.createPanelsBatch.bind(panelController)
+  registerPanel
 );
 
 // List panels route
 router.get(
   '/',
   requireAuth as any,
-  panelController.listPanels.bind(panelController)
-);
-
-// Get blockchain panels route
-router.get(
-  '/blockchain/all',
-  requireAuth as any,
-  panelController.getBlockchainPanels.bind(panelController)
+  listPanels
 );
 
 // Get panel details
 router.get(
   '/:panelId',
   requireAuth as any,
-  panelController.getPanelDetails.bind(panelController)
+  getPanelDetails
 );
 
 // Update panel
@@ -84,7 +69,7 @@ router.put(
       .withMessage('Capacity must be a positive number'),
   ],
   validateRequest as any,
-  panelController.updatePanel.bind(panelController)
+  updatePanel
 );
 
 // Update panel status
@@ -97,18 +82,21 @@ router.patch(
       .withMessage('Status must be one of: active, inactive, maintenance'),
   ],
   validateRequest as any,
-  panelController.setPanelStatus.bind(panelController)
+  setPanelStatus
 );
 
-// Get projects for investors
+// Get user's panels
 router.get(
-  '/projects/investors',
+  '/user/:userId',
   requireAuth as any,
-  panelController.getProjectsForInvestors.bind(panelController)
+  getUserPanels
 );
 
-// Investment routes
-router.post('/projects/:panelId/invest', requireAuth as any, panelController.investInProject);
-router.get('/investments', requireAuth as any, panelController.getUserInvestments);
+// Get all blockchain panels
+router.get(
+  '/blockchain/all',
+  requireAuth as any,
+  panelController.getBlockchainPanels.bind(panelController)
+);
 
 export { router as panelRouter }; 

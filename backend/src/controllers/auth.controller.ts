@@ -245,15 +245,13 @@ export class AuthController {
       console.log('User ID from token:', userId);
       const { walletAddress } = req.body;
 
-      if (!walletAddress) {
-        console.log('Wallet address is missing in the request');
-        return res.status(400).json({ error: 'Wallet address is required' });
-      }
-
-      // Validate wallet address format
-      if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
-        console.log('Invalid wallet address format:', walletAddress);
-        return res.status(400).json({ error: 'Invalid wallet address format' });
+      // Allow null for disconnecting wallet
+      if (walletAddress !== null) {
+        // Only validate format if walletAddress is not null
+        if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+          console.log('Invalid wallet address format:', walletAddress);
+          return res.status(400).json({ error: 'Invalid wallet address format' });
+        }
       }
 
       console.log('Updating wallet address for user:', userId);
@@ -275,7 +273,7 @@ export class AuthController {
       const clientRole = user.role === 'OWNER' ? 'owner' : 'investor';
 
       return res.json({ 
-        message: 'Wallet address updated successfully',
+        message: walletAddress === null ? 'Wallet disconnected successfully' : 'Wallet address updated successfully',
         user: {
           ...user,
           role: clientRole

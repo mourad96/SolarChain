@@ -40,7 +40,7 @@ export default function ProjectsPage() {
           throw new Error('No authentication token found');
         }
 
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/panels/projects/investors`, {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/panels/blockchain/all`, {
           headers: {
             'Authorization': `Bearer ${token}`,
           },
@@ -83,7 +83,7 @@ export default function ProjectsPage() {
         // Fallback to mock data if API fails
         const mockProjects = [
           {
-            id: '1',
+            id: '550e8400-e29b-41d4-a716-446655440000',
             name: 'Solar Farm Alpha',
             location: 'California, USA',
             capacity: '500 kW',
@@ -94,7 +94,7 @@ export default function ProjectsPage() {
             mockDataFields: ['all data'],
           },
           {
-            id: '2',
+            id: '550e8400-e29b-41d4-a716-446655440001',
             name: 'Green Energy Beta',
             location: 'Texas, USA',
             capacity: '300 kW',
@@ -105,7 +105,7 @@ export default function ProjectsPage() {
             mockDataFields: ['all data'],
           },
           {
-            id: '3',
+            id: '550e8400-e29b-41d4-a716-446655440002',
             name: 'Sunshine Valley',
             location: 'Arizona, USA',
             capacity: '750 kW',
@@ -116,7 +116,7 @@ export default function ProjectsPage() {
             mockDataFields: ['all data'],
           },
           {
-            id: '4',
+            id: '550e8400-e29b-41d4-a716-446655440003',
             name: 'Urban Rooftop Solar',
             location: 'New York, USA',
             capacity: '100 kW',

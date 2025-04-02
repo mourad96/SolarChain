@@ -205,8 +205,8 @@ export const transferTokens = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    // Transfer tokens on blockchain
-    const tx = await shareToken.transferPanelShares(token.onChainTokenId, to, amount);
+    // Transfer tokens on blockchain using the correct method name
+    const tx = await shareToken.transfer(to, amount);
     await tx.wait();
 
     // Update balances
@@ -248,15 +248,14 @@ export const getTokenDetails = async (req: Request, res: Response): Promise<void
       SELECT t.*, p.* 
       FROM share_tokens t
       JOIN panels p ON t."panelId" = p.id
-      JOIN "User" u ON p."ownerId" = u.id
       WHERE t."panelId" = ${panelId}
     `;
-    
+
     if (!tokens || tokens.length === 0) {
       res.status(404).json({ message: 'Token not found' });
       return;
     }
-    
+
     const token = tokens[0];
 
     if (!shareToken) {
@@ -264,19 +263,21 @@ export const getTokenDetails = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    // Get on-chain data
-    const [totalShares, isMinted] = await shareToken.getPanelTokenDetails(
-      token.onChainTokenId
-    );
+    // Get token details from blockchain using the correct method name
+    const [totalSupply, decimals, symbol] = await shareToken.getTokenDetails();
 
     res.json({
       id: token.id,
       panelId: token.panelId,
-      totalShares: totalShares.toString(),
+      totalShares: token.totalShares,
       onChainTokenId: token.onChainTokenId,
-      isMinted,
       holderBalances: token.holderBalances,
       isActive: token.isActive,
+      blockchainDetails: {
+        totalSupply: totalSupply.toString(),
+        decimals: decimals.toString(),
+        symbol
+      }
     });
   } catch (error) {
     logger.error('Error in getTokenDetails:', error);
@@ -639,51 +640,40 @@ export const getUserTokens = async (req: Request, res: Response): Promise<void> 
 
 export const getTokenHolders = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { panelId } = req.params;
+    const { tokenId } = req.params;
 
-    // Get token using raw SQL
-    const tokens = await prisma.$queryRaw<ShareToken[]>`
-      SELECT t.*, p.*
-      FROM share_tokens t
-      JOIN panels p ON t."panelId" = p.id
-      WHERE t."panelId" = ${panelId}
-    `;
-    
-    if (!tokens || tokens.length === 0) {
+    // Get token with holders
+    const token = await prisma.shareToken.findUnique({
+      where: { id: tokenId },
+      include: {
+        holders: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                walletAddress: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!token) {
       res.status(404).json({ message: 'Token not found' });
       return;
     }
-    
-    const token = tokens[0];
 
-    if (!shareToken) {
-      res.status(503).json({ message: 'Blockchain features are currently unavailable' });
-      return;
-    }
-
-    // Get on-chain holders
-    const holders = await shareToken.getTokenHolders();
-
-    // Get holder details from database
-    const holderDetails = await Promise.all(
-      holders.map(async (address: string) => {
-        const users = await prisma.$queryRaw<any[]>`
-          SELECT id, email FROM "User" WHERE "walletAddress" = ${address}
-        `;
-        const user = users.length > 0 ? users[0] : null;
-        const balances = token.holderBalances as HolderBalances;
-        return {
-          address,
-          balance: balances[address] || 0,
-          user: user
-            ? {
-                id: user.id,
-                email: user.email,
-              }
-            : null,
-        };
-      })
-    );
+    // Transform the data to match the expected format
+    const holderDetails = token.holders.map(holder => ({
+      address: holder.user.walletAddress || 'No wallet connected',
+      balance: holder.shareAmount,
+      user: {
+        id: holder.user.id,
+        email: holder.user.email
+      }
+    }));
 
     res.json(holderDetails);
   } catch (error) {

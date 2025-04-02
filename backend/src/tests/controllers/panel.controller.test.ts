@@ -2,9 +2,11 @@ import { Request, Response } from 'express';
 import * as panelController from '../../controllers/panel.controller';
 import { prismaMock, contractMock, providerMock } from '../setup';
 import { ethers } from 'ethers';
+import { prisma } from '../../config/prisma';
+import { AuthenticatedRequest } from '../../types/auth';
 
 describe('Panel Controller', () => {
-  let mockRequest: Partial<Request>;
+  let mockRequest: Partial<AuthenticatedRequest>;
   let mockResponse: Partial<Response>;
   let mockJson: jest.Mock;
   let mockStatus: jest.Mock;
@@ -31,11 +33,10 @@ describe('Panel Controller', () => {
       mockRequest = {
         body: mockPanel,
         user: {
-          userId: '1',
           id: '1',
           email: 'test@example.com',
           name: 'Test User',
-          role: 'user' as const,
+          role: 'owner',
           walletAddress: '0x123...',
         },
       };
@@ -55,7 +56,7 @@ describe('Panel Controller', () => {
       });
 
       await panelController.registerPanel(
-        mockRequest as Request,
+        mockRequest as AuthenticatedRequest,
         mockResponse as Response
       );
 
@@ -83,11 +84,10 @@ describe('Panel Controller', () => {
       mockRequest = {
         body: mockPanel,
         user: {
-          userId: '1',
           id: '1',
           email: 'test@example.com',
           name: 'Test User',
-          role: 'user' as const,
+          role: 'owner',
           walletAddress: '0x123...',
         },
       };
@@ -95,7 +95,7 @@ describe('Panel Controller', () => {
       prismaMock.panel.create.mockRejectedValueOnce(new Error('Database error'));
 
       await panelController.registerPanel(
-        mockRequest as Request,
+        mockRequest as AuthenticatedRequest,
         mockResponse as Response
       );
 
@@ -118,11 +118,10 @@ describe('Panel Controller', () => {
         params: { id: '1' },
         body: { status: 'INACTIVE' },
         user: {
-          userId: '1',
           id: '1',
           email: 'test@example.com',
           name: 'Test User',
-          role: 'user' as const,
+          role: 'owner',
           walletAddress: '0x123...',
         },
       };
@@ -134,7 +133,7 @@ describe('Panel Controller', () => {
       });
 
       await panelController.setPanelStatus(
-        mockRequest as Request,
+        mockRequest as AuthenticatedRequest,
         mockResponse as Response
       );
 
@@ -151,11 +150,10 @@ describe('Panel Controller', () => {
         params: { id: '1' },
         body: { status: 'INACTIVE' },
         user: {
-          userId: '2',
           id: '2',
           email: 'test@example.com',
           name: 'Test User',
-          role: 'user' as const,
+          role: 'owner',
           walletAddress: '0x123...',
         },
       };
@@ -167,7 +165,7 @@ describe('Panel Controller', () => {
       });
 
       await panelController.setPanelStatus(
-        mockRequest as Request,
+        mockRequest as AuthenticatedRequest,
         mockResponse as Response
       );
 

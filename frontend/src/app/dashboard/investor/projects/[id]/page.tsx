@@ -42,18 +42,20 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
           throw new Error('No authentication token found');
         }
 
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/panels/projects/investors`, {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/panels/${params.id}`, {
           headers: {
             'Authorization': `Bearer ${token}`,
           },
         });
 
         if (!response.ok) {
+          if (response.status === 404) {
+            throw new Error('This project does not exist or has been removed');
+          }
           throw new Error('Failed to fetch project details');
         }
 
-        const projects = await response.json();
-        const projectDetail = projects.find((p: any) => p.id === params.id);
+        const projectDetail = await response.json();
         
         if (!projectDetail) {
           throw new Error('Project not found');
@@ -137,18 +139,20 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
         throw new Error('No authentication token found');
       }
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/panels/projects/investors`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/panels/${params.id}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       });
 
       if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error('This project does not exist or has been removed');
+        }
         throw new Error('Failed to fetch project details');
       }
 
-      const projects = await response.json();
-      const projectDetail = projects.find((p: any) => p.id === params.id);
+      const projectDetail = await response.json();
       
       if (!projectDetail) {
         throw new Error('Project not found');

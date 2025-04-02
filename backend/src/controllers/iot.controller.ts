@@ -1,10 +1,14 @@
 import { Request, Response } from 'express';
 import { ethers } from 'ethers';
-import { SolarPanelContract } from '../typechain-types/contracts/SolarPanel';
 import { AuthenticatedRequest } from '../types/auth';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { prisma } from '../services/prisma.service';
+
+// Basic interface for the contract until we generate proper types
+interface SolarPanelContract extends ethers.BaseContract {
+  updatePanelData(panelId: ethers.BigNumberish, energyOutput: ethers.BigNumberish): Promise<ethers.ContractTransaction>;
+}
 
 interface IoTReading {
   id: string;

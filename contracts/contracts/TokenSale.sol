@@ -239,4 +239,37 @@ contract TokenSale is
     function unpause() external onlyRole(ADMIN_ROLE) {
         _unpause();
     }
+
+    /**
+     * @dev Returns all the important details about the token sale
+     * @return shareTokenAddress The address of the share token
+     * @return paymentTokenAddress The address of the payment token (USDC)
+     * @return currentPrice The current price per token
+     * @return AvailableTokens The number of tokens still available
+     * @return SoldTokens The number of tokens sold so far
+     * @return SaleEndTime The timestamp when the sale ends
+     * @return isActive Whether the sale is currently active
+     * @return isPaused Whether the contract is currently paused
+     */
+    function getSaleDetails() external view returns (
+        address shareTokenAddress,
+        address paymentTokenAddress,
+        uint256 currentPrice,
+        uint256 AvailableTokens,
+        uint256 SoldTokens,
+        uint256 SaleEndTime,
+        bool isActive,
+        bool isPaused
+    ) {
+        return (
+            address(shareToken),
+            address(paymentToken),
+            price,
+            availableTokens,
+            soldTokens,
+            saleEndTime,
+            isSaleActive,
+            paused()
+        );
+    }
 }

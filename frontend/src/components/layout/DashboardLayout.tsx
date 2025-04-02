@@ -29,6 +29,7 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
   const { user } = useAuthContext();
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
+  const [showWalletMenu, setShowWalletMenu] = useState(false);
 
   const ownerNavItems = [
     { name: 'Overview', href: '/dashboard/owner' },
@@ -143,6 +144,36 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
     window.location.href = '/';
   };
 
+  const disconnectWallet = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Authentication token not found. Please log in again.');
+        return;
+      }
+
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/update-wallet`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ walletAddress: null }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to disconnect wallet');
+      }
+
+      setWalletAddress(null);
+      setShowWalletMenu(false);
+      toast.success('Wallet disconnected successfully');
+    } catch (error) {
+      console.error('Error disconnecting wallet:', error);
+      toast.error('Failed to disconnect wallet. Please try again.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Sidebar */}
@@ -190,8 +221,28 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
                 ) : 'Connect Wallet'}
               </button>
             ) : (
-              <div className="text-sm text-gray-700 bg-gray-100 px-4 py-2 rounded-lg">
-                Wallet: {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+              <div className="relative">
+                <button
+                  onClick={() => setShowWalletMenu(!showWalletMenu)}
+                  className="text-sm text-gray-700 bg-gray-100 px-4 py-2 rounded-lg hover:bg-gray-200 flex items-center space-x-2"
+                >
+                  <span>Wallet: {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}</span>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {showWalletMenu && (
+                  <div className="absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5">
+                    <div className="py-1">
+                      <button
+                        onClick={disconnectWallet}
+                        className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
+                      >
+                        Disconnect Wallet
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             <button className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200">

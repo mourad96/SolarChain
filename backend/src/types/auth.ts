@@ -5,7 +5,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  role: 'owner' | 'investor';
+  role: 'owner' | 'investor' | 'user';
   walletAddress?: string;
 }
 
