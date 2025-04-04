@@ -182,6 +182,7 @@ export async function getPanelDetails(req: Request, res: Response) {
       if (blockchainPanel) {
         const mergedPanel = {
           ...panel,
+          price: blockchainPanel.price || '0.00',
           blockchainData: {
             tokenId: blockchainPanel.tokenId,
             totalSupply: blockchainPanel.totalSupply,
@@ -195,6 +196,7 @@ export async function getPanelDetails(req: Request, res: Response) {
         // If no blockchain data, return database panel with blockchain status
         res.json({
           ...panel,
+          price: '0.00',
           blockchainData: null,
           isBlockchainVerified: false
         });
@@ -209,7 +211,7 @@ export async function getPanelDetails(req: Request, res: Response) {
         name: `Solar Panel ${panelId}`,
         location: 'Blockchain',
         capacity: '0',
-        minInvestment: '0',
+        price: blockchainPanel.price || '0.00',
         expectedROI: '0',
         progress: 0,
         owner: blockchainPanel.owner,

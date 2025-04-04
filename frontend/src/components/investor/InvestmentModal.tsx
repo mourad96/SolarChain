@@ -6,7 +6,7 @@ interface ProjectDetail {
   name: string;
   location: string;
   capacity: string;
-  minInvestment: string;
+  price: string;
   expectedROI: string;
   progress: number;
   owner: string;
@@ -33,8 +33,8 @@ export default function InvestmentModal({ project, onClose, onInvest }: Investme
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Calculate cost based on minimum investment
-  const sharePrice = parseFloat(project.minInvestment.replace('$', ''));
+  // Calculate cost based on price
+  const sharePrice = parseFloat(project.price.replace('$', ''));
   const totalCost = sharePrice * shareCount;
 
   const availableShares = project.blockchainData?.availableSupply 
@@ -65,7 +65,7 @@ export default function InvestmentModal({ project, onClose, onInvest }: Investme
         throw new Error('Authentication token not found');
       }
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/panels/projects/${project.id}/invest`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/panels/${project.id}/invest`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -151,7 +151,7 @@ export default function InvestmentModal({ project, onClose, onInvest }: Investme
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700">Share Price</label>
-                <div className="mt-1 text-lg font-semibold">{project.minInvestment}</div>
+                <div className="mt-1 text-lg font-semibold">{project.price}</div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Available Shares</label>

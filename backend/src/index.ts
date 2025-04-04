@@ -1,7 +1,7 @@
 import 'dotenv/config'; // Load environment variables first
 import express from 'express';
 import cors from 'cors';
-import { router } from './routes';
+import router from './routes';
 import { prisma } from './services/prisma.service'; 
 import { logger } from './utils/logger';
 

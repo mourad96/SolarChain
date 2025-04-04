@@ -11,7 +11,7 @@ interface ProjectDetail {
   name: string;
   location: string;
   capacity: string;
-  minInvestment: string;
+  price: string;
   expectedROI: string;
   progress: number;
   owner: string;
@@ -61,6 +61,8 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
           throw new Error('Project not found');
         }
         
+        console.log('Project detail from API:', projectDetail);
+        
         // Process the project to identify mock fields
         const mockDataFields: string[] = [];
         let isMockData = false;
@@ -80,9 +82,9 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
             mockDataFields.push('progress');
             
             // Default values often indicate mock data
-            if (projectDetail.minInvestment === '$1,000' || projectDetail.minInvestment === '$500' || 
-                projectDetail.minInvestment === '$2,000' || projectDetail.minInvestment === '$250') {
-              mockDataFields.push('minimum investment');
+            if (projectDetail.price === '$1,000' || projectDetail.price === '$500' || 
+                projectDetail.price === '$2,000' || projectDetail.price === '$250') {
+              mockDataFields.push('price');
             }
             
             if (projectDetail.expectedROI === '12%' || projectDetail.expectedROI === '15%' || 
@@ -114,6 +116,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
           isBlockchainVerified
         };
         
+        console.log('Processed project:', processedProject);
         setProject(processedProject);
       } catch (error) {
         console.error('Error fetching project details:', error);
@@ -158,6 +161,8 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
         throw new Error('Project not found');
       }
       
+      console.log('Project detail from API:', projectDetail);
+      
       // Process the project to identify mock fields
       const mockDataFields: string[] = [];
       let isMockData = false;
@@ -177,9 +182,9 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
           mockDataFields.push('progress');
           
           // Default values often indicate mock data
-          if (projectDetail.minInvestment === '$1,000' || projectDetail.minInvestment === '$500' || 
-              projectDetail.minInvestment === '$2,000' || projectDetail.minInvestment === '$250') {
-            mockDataFields.push('minimum investment');
+          if (projectDetail.price === '$1,000' || projectDetail.price === '$500' || 
+              projectDetail.price === '$2,000' || projectDetail.price === '$250') {
+            mockDataFields.push('price');
           }
           
           if (projectDetail.expectedROI === '12%' || projectDetail.expectedROI === '15%' || 
@@ -211,6 +216,7 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
         isBlockchainVerified
       };
       
+      console.log('Processed project:', processedProject);
       setProject(processedProject);
     } catch (error) {
       console.error('Error fetching project details:', error);
@@ -292,10 +298,10 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
                 </dd>
               </div>
               <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                <dt className="text-sm font-medium text-gray-500">Minimum investment</dt>
+                <dt className="text-sm font-medium text-gray-500">Token Price</dt>
                 <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
-                  {project.minInvestment}
-                  {project.mockDataFields?.includes('minimum investment') && (
+                  {project.price}
+                  {project.mockDataFields?.includes('price') && (
                     <span className="ml-2 text-xs font-bold bg-amber-100 text-amber-800 px-1 py-0.5 rounded">(mock data)</span>
                   )}
                 </dd>

@@ -473,6 +473,7 @@ export class BlockchainService {
 
         // Get token price from TokenSale contract
         const price = await this.getTokenPrice(panel.saleContractAddress);
+        console.log("Token price from blockchain:", price);
         
         return {
           tokenId: blockchainPanelId.toString(),
@@ -481,7 +482,7 @@ export class BlockchainService {
           owner: panel.owner,
           isActive: panel.isActive,
           registrationDate: Number(panel.registrationDate),
-          price: price
+          price: price || "0.00"
         };
       } catch (tokenError) {
         logger.error(`Error fetching token details for panel ${blockchainPanelId}:`, tokenError);
@@ -1122,25 +1123,16 @@ export class BlockchainService {
       const wallet = new ethers.Wallet(privateKey, this.provider);
       const registryWithSigner = this.registryContract!.connect(wallet);
       
-      // Assuming we have a purchaseShares function in the registry contract
-      // that takes payment in USDC and transfers share tokens
-      logger.info('Executing share purchase transaction:', {
-        panelId: blockchainPanelId,
-        shareTokenAddress: panel.shareTokenAddress,
-        amount,
-        investor: investorAddress,
-        cost: totalCostInWei.toString()
-      });
+      // Create contract instance for the TokenSale contract
+      const tokenSaleContract = new ethers.Contract(
+        panel.saleContractAddress,
+        ['function purchaseTokens(uint256 amount)'],
+        wallet
+      );
       
-      // Call the purchaseShares function on the registry
-      // If this function doesn't exist, it should be added to the smart contract
+      // Call the purchaseTokens function
       try {
-        const tx = await (registryWithSigner as any).purchaseShares(
-          blockchainPanelId,
-          amount,
-          investorAddress,
-          totalCostInWei
-        );
+        const tx = await tokenSaleContract.purchaseTokens(amount);
         
         logger.info('Purchase transaction submitted:', {
           txHash: tx.hash,
