@@ -187,7 +187,9 @@ export async function getPanelDetails(req: Request, res: Response) {
             tokenId: blockchainPanel.tokenId,
             totalSupply: blockchainPanel.totalSupply,
             availableSupply: blockchainPanel.availableSupply,
-            isMockData: blockchainPanel.isMockData || false
+            isMockData: blockchainPanel.isMockData || false,
+            saleContractAddress: blockchainPanel.saleContractAddress,
+            shareTokenAddress: blockchainPanel.shareTokenAddress
           },
           isBlockchainVerified: !blockchainPanel.isMockData
         };
@@ -219,7 +221,9 @@ export async function getPanelDetails(req: Request, res: Response) {
           tokenId: blockchainPanel.tokenId,
           totalSupply: blockchainPanel.totalSupply,
           availableSupply: blockchainPanel.availableSupply,
-          isMockData: blockchainPanel.isMockData || false
+          isMockData: blockchainPanel.isMockData || false,
+          saleContractAddress: blockchainPanel.saleContractAddress,
+          shareTokenAddress: blockchainPanel.shareTokenAddress
         },
         isBlockchainVerified: !blockchainPanel.isMockData
       };

@@ -20,6 +20,8 @@ interface ProjectDetail {
     totalSupply: string;
     availableSupply: string;
     isMockData?: boolean;
+    saleContractAddress?: string;
+    shareTokenAddress?: string;
   } | null;
   createdAt: string;
   isMockData?: boolean;

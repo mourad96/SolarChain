@@ -55,6 +55,41 @@ async function main() {
     const mintAmount = ethers.parseUnits("1000000", 18); // 1 million tokens
     await paymentToken.mint(deployer.address, mintAmount, overrides);
     console.log(`Minted ${ethers.formatUnits(mintAmount, 18)} USDC to deployer`);
+
+    // Mint tokens to investor addresses
+    console.log("Minting test tokens to investors...");
+    const investor1Address = process.env.INVESTOR1_ADDRESS;
+    const investor2Address = process.env.INVESTOR2_ADDRESS;
+    
+    if (investor1Address) {
+      await paymentToken.mint(investor1Address, mintAmount, overrides);
+      console.log(`Minted ${ethers.formatUnits(mintAmount, 18)} USDC to investor 1`);
+    }
+    
+    if (investor2Address) {
+      await paymentToken.mint(investor2Address, mintAmount, overrides);
+      console.log(`Minted ${ethers.formatUnits(mintAmount, 18)} USDC to investor 2`);
+    }
+
+
+    // Send 10 ETH to investor addresses
+    const amount = ethers.parseUnits("10", "ether"); // 10 ETH
+
+    const tx = await deployer.sendTransaction({
+      to: investor1Address,
+      value: amount,
+    });
+
+    console.log(`Sent 10 ETH to ${investor1Address}`);
+    console.log("Transaction hash:", tx.hash);
+
+    const tx2 = await deployer.sendTransaction({
+      to: investor2Address,
+      value: amount,
+    });
+
+    console.log(`Sent 10 ETH to ${investor2Address}`);
+    console.log("Transaction hash:", tx2.hash);
   }
 
   // Deploy SolarPanelFactory (upgradeable) - now with both required parameters

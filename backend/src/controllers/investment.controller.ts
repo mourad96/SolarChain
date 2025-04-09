@@ -55,6 +55,10 @@ export const investInProject = async (req: AuthenticatedRequest, res: Response):
       user.walletAddress
     );
 
+    if (!result || !result.txHash) {
+      throw new Error('Investment transaction failed. No transaction hash returned.');
+    }
+    
     // Record the investment in the database using the database ID
     await prisma.investment.create({
       data: {

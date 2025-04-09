@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { toast } from 'react-hot-toast';
+import { ethers } from 'ethers';
 
 interface ProjectDetail {
   id: string;
@@ -15,6 +16,7 @@ interface ProjectDetail {
     totalSupply: string;
     availableSupply: string;
     isMockData?: boolean;
+    saleContractAddress?: string;
   } | null;
   createdAt: string;
   isMockData?: boolean;
@@ -28,10 +30,17 @@ interface InvestmentModalProps {
   onInvest: (shareCount: number) => void;
 }
 
+// ABI for ERC20 token approval function
+const ERC20_ABI = [
+  "function approve(address spender, uint256 amount) external returns (bool)",
+  "function allowance(address owner, address spender) external view returns (uint256)"
+];
+
 export default function InvestmentModal({ project, onClose, onInvest }: InvestmentModalProps) {
   const [shareCount, setShareCount] = useState<number>(1);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [isApproving, setIsApproving] = useState<boolean>(false);
 
   // Calculate cost based on price
   const sharePrice = parseFloat(project.price.replace('$', ''));
@@ -53,11 +62,127 @@ export default function InvestmentModal({ project, onClose, onInvest }: Investme
     }
   };
 
+  // Approve USDC spending
+  const approveUSDC = async (): Promise<boolean> => {
+    try {
+      setIsApproving(true);
+      
+      // Check if window.ethereum is available (MetaMask or other wallet)
+      if (!window.ethereum) {
+        throw new Error('No Ethereum wallet found. Please install MetaMask');
+      }
+
+      // Get the provider and signer
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      
+      // Log network info for debugging
+      const network = await provider.getNetwork();
+      const chainId = network.chainId;
+      console.log("Current network:", {
+        name: network.name,
+        chainId: chainId.toString()
+      });
+      
+      // Check for localhost network
+      const isLocalNetwork = 
+        chainId === BigInt(1337) || // Ganache default
+        chainId === BigInt(31337) || // Hardhat default
+        network.name === 'localhost' ||
+        network.name === 'unknown';
+        
+      if (!isLocalNetwork) {
+        throw new Error(`You're connected to ${network.name} (chainId: ${chainId}). Please switch to localhost network in MetaMask to interact with local contracts.`);
+      }
+      
+      const signer = await provider.getSigner();
+      const userAddress = await signer.getAddress();
+      console.log("Connected wallet address:", userAddress);
+      
+      // Get token information from environment variables
+      const usdcAddress = process.env.NEXT_PUBLIC_MOCK_ERC20_ADDRESS;
+      const saleContractAddress = project.blockchainData?.saleContractAddress;
+      console.log("Contract addresses:", {
+        usdcToken: usdcAddress,
+        saleContract: saleContractAddress
+      });
+      
+      if (!usdcAddress || !saleContractAddress) {
+        throw new Error('Contract addresses not configured correctly in environment variables');
+      }
+
+      // Validate addresses are proper Ethereum addresses
+      if (!ethers.isAddress(usdcAddress) || !ethers.isAddress(saleContractAddress)) {
+        throw new Error('Invalid contract address format. Please check your environment variables.');
+      }
+
+      // Create USDC contract instance
+      const usdcContract = new ethers.Contract(usdcAddress, ERC20_ABI, signer);
+      
+      // Calculate amount to approve (with proper decimals)
+      const decimals = 18; // USDC usually has 6 decimals on mainnet, but test tokens often use 18
+      const approvalAmount = ethers.parseUnits(totalCost.toString(), decimals);
+      console.log("Approval amount:", ethers.formatUnits(approvalAmount, decimals));
+      
+      // Use try/catch specifically for the allowance call
+      try {
+        console.log("Checking current allowance...");
+        console.log("Parameters:", {
+          owner: userAddress,
+          spender: saleContractAddress
+        });
+        
+        // Check current allowance
+        const currentAllowance = await usdcContract.allowance(userAddress, saleContractAddress);
+        console.log("Current allowance:", ethers.formatUnits(currentAllowance, decimals));
+        
+        // If allowance is already sufficient, return without approving again
+        if (currentAllowance >= approvalAmount) {
+          toast.success('USDC already approved');
+          return true;
+        }
+      } catch (allowanceError: any) {
+        console.error('Error checking allowance:', allowanceError);
+        
+        // Check if contract exists at the address
+        const code = await provider.getCode(usdcAddress);
+        if (code === '0x' || code === '') {
+          throw new Error(`No contract found at USDC address ${usdcAddress}. Make sure your contract is deployed to the current network.`);
+        }
+        
+        throw new Error(`Failed to check allowance: ${allowanceError.message}. Make sure your contracts are deployed to the localhost network.`);
+      }
+      
+      console.log("Approving USDC...");
+      // Approve USDC spending
+      toast.loading('Approving USDC spending. Please confirm in your wallet...', { id: 'approve' });
+      const tx = await usdcContract.approve(saleContractAddress, approvalAmount);
+      
+      // Wait for transaction to be mined
+      await tx.wait();
+      
+      toast.success('USDC approved successfully', { id: 'approve' });
+      return true;
+    } catch (error: any) {
+      console.error('USDC approval error:', error);
+      toast.error(error.message || 'Failed to approve USDC', { id: 'approve' });
+      setError(error.message || 'Failed to approve USDC');
+      return false;
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
   // Handle investment submission
   const handleInvest = async () => {
     try {
       setIsLoading(true);
       setError(null);
+
+      // First, approve USDC spending
+      const isApproved = await approveUSDC();
+      if (!isApproved) {
+        throw new Error('USDC approval required to proceed with investment');
+      }
 
       // Call the API to invest in the project
       const token = localStorage.getItem('token');
@@ -88,8 +213,15 @@ export default function InvestmentModal({ project, onClose, onInvest }: Investme
       onInvest(shareCount);
     } catch (error: any) {
       console.error('Investment error:', error);
-      setError(error.message || 'Failed to process investment');
-      toast.error(error.message || 'Failed to process investment');
+      
+      // Handle specific backend errors
+      if (error.message && error.message.includes("Cannot read properties of undefined (reading 'txHash')")) {
+        setError("Backend error: Transaction hash missing. This usually happens when the backend can't process the blockchain transaction. Check your backend logs.");
+        toast.error("Backend error: Transaction hash missing. Please contact support.");
+      } else {
+        setError(error.message || 'Failed to process investment');
+        toast.error(error.message || 'Failed to process investment');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -210,9 +342,13 @@ export default function InvestmentModal({ project, onClose, onInvest }: Investme
                 type="button"
                 className="inline-flex justify-center w-full rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:text-sm"
                 onClick={handleInvest}
-                disabled={isLoading}
+                disabled={isLoading || isApproving}
               >
-                {isLoading ? 'Processing...' : 'Confirm Investment'}
+                {isLoading 
+                  ? 'Processing...' 
+                  : isApproving 
+                    ? 'Approving USDC...' 
+                    : 'Confirm Investment'}
               </button>
             </div>
           </div>

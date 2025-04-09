@@ -482,7 +482,9 @@ export class BlockchainService {
           owner: panel.owner,
           isActive: panel.isActive,
           registrationDate: Number(panel.registrationDate),
-          price: price || "0.00"
+          price: price || "0.00",
+          saleContractAddress: panel.saleContractAddress,
+          shareTokenAddress: panel.shareTokenAddress
         };
       } catch (tokenError) {
         logger.error(`Error fetching token details for panel ${blockchainPanelId}:`, tokenError);
@@ -1063,13 +1065,6 @@ export class BlockchainService {
       // Create contract instance for the share token
       const shareTokenContract = ShareToken__factory.connect(panel.shareTokenAddress, this.provider);
       
-      // Calculate available supply
-      const registryBalance = await shareTokenContract.balanceOf(this.registryContract!.target);
-      
-      // If amount is more than available, throw error
-      if (BigInt(amount) > registryBalance) {
-        throw new Error(`Insufficient shares available. Requested: ${amount}, Available: ${registryBalance.toString()}`);
-      }
       
       // Load USDC contract (MockERC20) address from environment
       const usdcAddress = process.env.MOCK_ERC20_ADDRESS;
@@ -1103,7 +1098,7 @@ export class BlockchainService {
       // 1. Investor needs to approve the registry to spend their USDC
       // This would typically be done in the frontend before calling this method
       // We'll check if the required allowance is already present
-      const currentAllowance = await usdcContract.allowance(investorAddress, this.registryContract!.target);
+      const currentAllowance = await usdcContract.allowance(investorAddress, panel.saleContractAddress);
       
       if (currentAllowance < totalCostInWei) {
         logger.warn('Insufficient USDC allowance for purchase', {
@@ -1121,7 +1116,6 @@ export class BlockchainService {
       }
       
       const wallet = new ethers.Wallet(privateKey, this.provider);
-      const registryWithSigner = this.registryContract!.connect(wallet);
       
       // Create contract instance for the TokenSale contract
       const tokenSaleContract = new ethers.Contract(
@@ -1157,74 +1151,11 @@ export class BlockchainService {
         };
       } catch (purchaseError) {
         logger.error('Error in purchase transaction:', purchaseError);
-        
-        // Fallback implementation if purchaseShares doesn't exist in the registry
-        // This is a simplified two-step process that should be replaced with a proper
-        // atomic transaction in the smart contract for security
-        
-        logger.info('Attempting fallback implementation for purchase...');
-        
-        // 1. Transfer USDC from investor to registry
-        const usdcWithSigner = usdcContract.connect(wallet);
-        
-        // We need the investor to have already called transferFrom in their client
-        // to allow the registry to move their tokens
-        try {
-          // Execute transferFrom to move USDC from investor to registry
-          const transferTx = await usdcWithSigner.transferFrom(
-            investorAddress,
-            this.registryContract!.target,
-            totalCostInWei
-          );
-          
-          logger.info('USDC transfer transaction submitted:', {
-            txHash: transferTx.hash,
-            amount: totalCostInWei.toString(),
-            from: investorAddress,
-            to: this.registryContract!.target
-          });
-          
-          // Wait for the transfer to complete
-          await transferTx.wait();
-          
-          // 2. Transfer share tokens from registry to investor
-          // The registry should be authorized to transfer tokens
-          // This assumes the registry holds the tokens and we have authority to transfer from it
-          const shareTx = await (registryWithSigner as any).transferShares(
-            panel.shareTokenAddress,
-            investorAddress,
-            amount
-          );
-          
-          logger.info('Share token transfer transaction submitted:', {
-            txHash: shareTx.hash,
-            amount,
-            to: investorAddress
-          });
-          
-          // Wait for the token transfer to complete
-          const shareReceipt = await shareTx.wait();
-          
-          logger.info('Purchase completed (fallback implementation):', {
-            txHash: shareReceipt.hash,
-            blockNumber: shareReceipt.blockNumber,
-            sharesPurchased: amount,
-            usdcPaid: ethers.formatUnits(totalCostInWei, 18)
-          });
-          
-          return {
-            txHash: shareReceipt.hash,
-            sharesPurchased: amount,
-            tokenAddress: panel.shareTokenAddress
-          };
-        } catch (fallbackError) {
-          logger.error('Fallback implementation failed:', fallbackError);
-          throw new Error(`Purchase transaction failed: ${fallbackError.message}`);
-        }
+        throw new Error(`Purchase transaction failed: ${purchaseError.message}`);
       }
     } catch (error) {
       logger.error('Error investing in project:', error);
       throw new Error(`Failed to invest in project: ${error.message}`);
     }
   }
-} 
+}
