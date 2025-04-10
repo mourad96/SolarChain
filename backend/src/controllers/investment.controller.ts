@@ -55,28 +55,52 @@ export const investInProject = async (req: AuthenticatedRequest, res: Response):
       user.walletAddress
     );
 
-    if (!result || !result.txHash) {
-      throw new Error('Investment transaction failed. No transaction hash returned.');
-    }
-    
-    // Record the investment in the database using the database ID
-    await prisma.investment.create({
-      data: {
-        userId,
-        panelId: panel.id,
-        sharesPurchased: shares,
-        transactionHash: result.txHash,
-        tokenAddress: result.tokenAddress
-      }
-    });
-
+    // Return the transaction data to the frontend for signing
     res.json({
-      message: 'Investment successful',
-      transactionHash: result.txHash,
-      sharesPurchased: shares
+      message: 'Transaction data ready for signing',
+      transactionData: result.transactionData,
+      sharesPurchased: shares,
+      tokenAddress: result.tokenAddress
     });
   } catch (error: any) {
     logger.error('Investment error:', error);
     res.status(500).json({ error: error.message || 'Failed to process investment' });
+  }
+};
+
+export const recordInvestment = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { panelId, sharesPurchased, transactionHash, tokenAddress } = req.body;
+    const userId = req.user.id;
+
+    // Get panel details
+    const panel = await prisma.panel.findUnique({
+      where: { id: panelId },
+      select: { id: true }
+    });
+
+    if (!panel) {
+      res.status(404).json({ error: 'Panel not found' });
+      return;
+    }
+
+    // Record the investment in the database
+    const investment = await prisma.investment.create({
+      data: {
+        userId,
+        panelId: panel.id,
+        sharesPurchased,
+        transactionHash,
+        tokenAddress
+      }
+    });
+
+    res.json({
+      message: 'Investment recorded successfully',
+      investment
+    });
+  } catch (error: any) {
+    logger.error('Error recording investment:', error);
+    res.status(500).json({ error: error.message || 'Failed to record investment' });
   }
 }; 

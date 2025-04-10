@@ -134,6 +134,7 @@ export default function InvestmentModal({ project, onClose, onInvest }: Investme
         // Check current allowance
         const currentAllowance = await usdcContract.allowance(userAddress, saleContractAddress);
         console.log("Current allowance:", ethers.formatUnits(currentAllowance, decimals));
+        console.log("usdcContract", usdcContract);
         
         // If allowance is already sufficient, return without approving again
         if (currentAllowance >= approvalAmount) {
@@ -184,13 +185,13 @@ export default function InvestmentModal({ project, onClose, onInvest }: Investme
         throw new Error('USDC approval required to proceed with investment');
       }
 
-      // Call the API to invest in the project
+      // Call the API to get transaction data
       const token = localStorage.getItem('token');
       if (!token) {
         throw new Error('Authentication token not found');
       }
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/panels/${project.id}/invest`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/investments/${project.id}/invest`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -206,6 +207,43 @@ export default function InvestmentModal({ project, onClose, onInvest }: Investme
 
       const result = await response.json();
       
+      // Sign and send the transaction using the investor's wallet
+      if (!window.ethereum) {
+        throw new Error('No Ethereum wallet found. Please install MetaMask');
+      }
+
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      
+      // Send the transaction
+      const tx = await signer.sendTransaction(result.transactionData);
+      
+      // Wait for transaction confirmation
+      const receipt = await tx.wait();
+      
+      if (!receipt) {
+        throw new Error('Transaction failed - no receipt received');
+      }
+      
+      // Record the investment in the database
+      const recordResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/investments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          panelId: project.id,
+          sharesPurchased: shareCount,
+          transactionHash: receipt.hash,
+          tokenAddress: result.tokenAddress
+        }),
+      });
+
+      if (!recordResponse.ok) {
+        throw new Error('Failed to record investment in database');
+      }
+      
       // Show success toast
       toast.success('Investment successful!');
       
@@ -213,15 +251,8 @@ export default function InvestmentModal({ project, onClose, onInvest }: Investme
       onInvest(shareCount);
     } catch (error: any) {
       console.error('Investment error:', error);
-      
-      // Handle specific backend errors
-      if (error.message && error.message.includes("Cannot read properties of undefined (reading 'txHash')")) {
-        setError("Backend error: Transaction hash missing. This usually happens when the backend can't process the blockchain transaction. Check your backend logs.");
-        toast.error("Backend error: Transaction hash missing. Please contact support.");
-      } else {
-        setError(error.message || 'Failed to process investment');
-        toast.error(error.message || 'Failed to process investment');
-      }
+      setError(error.message || 'Failed to process investment');
+      toast.error(error.message || 'Failed to process investment');
     } finally {
       setIsLoading(false);
     }

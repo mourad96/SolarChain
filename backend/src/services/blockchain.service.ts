@@ -1041,7 +1041,12 @@ export class BlockchainService {
     panelId: string,
     amount: number,
     investorAddress: string
-  ): Promise<{ txHash: string; sharesPurchased: number; tokenAddress: string }> {
+  ): Promise<{ 
+    txHash: string; 
+    sharesPurchased: number; 
+    tokenAddress: string;
+    transactionData: any; // Add transactionData to return type
+  }> {
     try {
       this.checkInitialization();
       
@@ -1064,7 +1069,6 @@ export class BlockchainService {
       
       // Create contract instance for the share token
       const shareTokenContract = ShareToken__factory.connect(panel.shareTokenAddress, this.provider);
-      
       
       // Load USDC contract (MockERC20) address from environment
       const usdcAddress = process.env.MOCK_ERC20_ADDRESS;
@@ -1099,7 +1103,8 @@ export class BlockchainService {
       // This would typically be done in the frontend before calling this method
       // We'll check if the required allowance is already present
       const currentAllowance = await usdcContract.allowance(investorAddress, panel.saleContractAddress);
-      
+      console.log("investorAddress", investorAddress);
+      console.log("panel.saleContractAddress", panel.saleContractAddress);
       if (currentAllowance < totalCostInWei) {
         logger.warn('Insufficient USDC allowance for purchase', {
           currentAllowance: currentAllowance.toString(),
@@ -1108,51 +1113,24 @@ export class BlockchainService {
         throw new Error('Investor must approve USDC spending first. Please approve the required amount in your wallet.');
       }
       
-      // 2. Execute the purchase on behalf of the investor
-      // This requires a function in the registry contract that handles the payment and token transfer
-      const privateKey = process.env.PRIVATE_KEY;
-      if (!privateKey) {
-        throw new Error('Missing private key for blockchain transactions');
-      }
-      
-      const wallet = new ethers.Wallet(privateKey, this.provider);
-      
+      // 2. Return the transaction data for the frontend to sign
       // Create contract instance for the TokenSale contract
       const tokenSaleContract = new ethers.Contract(
         panel.saleContractAddress,
         ['function purchaseTokens(uint256 amount)'],
-        wallet
+        this.provider
       );
       
-      // Call the purchaseTokens function
-      try {
-        const tx = await tokenSaleContract.purchaseTokens(amount);
-        
-        logger.info('Purchase transaction submitted:', {
-          txHash: tx.hash,
-          amount,
-          investor: investorAddress
-        });
-        
-        // Wait for transaction to complete
-        const receipt = await tx.wait();
-        
-        logger.info('Purchase transaction confirmed:', {
-          txHash: receipt.hash,
-          blockNumber: receipt.blockNumber,
-          amount,
-          investor: investorAddress
-        });
-        
-        return {
-          txHash: receipt.hash,
-          sharesPurchased: amount,
-          tokenAddress: panel.shareTokenAddress
-        };
-      } catch (purchaseError) {
-        logger.error('Error in purchase transaction:', purchaseError);
-        throw new Error(`Purchase transaction failed: ${purchaseError.message}`);
-      }
+      // Get the transaction data
+      const txData = await tokenSaleContract.purchaseTokens.populateTransaction(amount);
+      
+      // Return the transaction data for the frontend to sign
+      return {
+        txHash: '', // Will be filled by frontend after signing
+        sharesPurchased: amount,
+        tokenAddress: panel.shareTokenAddress,
+        transactionData: txData // Add transaction data for frontend
+      };
     } catch (error) {
       logger.error('Error investing in project:', error);
       throw new Error(`Failed to invest in project: ${error.message}`);

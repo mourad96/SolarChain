@@ -16,10 +16,10 @@ router.get('/health', (_req, res) => {
 // API routes  
 router.use('/auth', authRouter);  
 router.use('/panels', panelRouter);  
-router.use('/panels', investmentRoutes);  
 router.use('/iot', iotRouter);  
 router.use('/tokens', tokenRouter);  
 router.use('/dashboard', dashboardRoutes);  
+router.use('/investments', investmentRoutes);  
 
 // Right before you export router:
 router.all('*', (req, res) => {
