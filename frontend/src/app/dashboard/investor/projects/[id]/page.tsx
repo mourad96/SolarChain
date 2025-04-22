@@ -322,14 +322,39 @@ export default function ProjectDetailPage({ params }: { params: { id: string } }
                 <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
                   <div className="flex items-center justify-between">
                     <span>
-                      {project.progress}%
-                      {project.mockDataFields?.includes('progress') && (
-                        <span className="ml-2 text-xs font-bold bg-amber-100 text-amber-800 px-1 py-0.5 rounded">(mock data)</span>
+                      {project.blockchainData ? (
+                        <>
+                          {Math.round(
+                            ((parseInt(project.blockchainData.totalSupply) - parseInt(project.blockchainData.availableSupply)) /
+                              parseInt(project.blockchainData.totalSupply)) *
+                              100
+                          )}%
+                        </>
+                      ) : (
+                        <>
+                          {project.progress}%
+                          {project.mockDataFields?.includes('progress') && (
+                            <span className="ml-2 text-xs font-bold bg-amber-100 text-amber-800 px-1 py-0.5 rounded">(mock data)</span>
+                          )}
+                        </>
                       )}
                     </span>
                   </div>
                   <div className="mt-2 w-full bg-gray-200 rounded-full h-2.5">
-                    <div className="bg-blue-600 h-2.5 rounded-full" style={{ width: `${project.progress}%` }}></div>
+                    <div
+                      className="bg-blue-600 h-2.5 rounded-full"
+                      style={{
+                        width: `${
+                          project.blockchainData
+                            ? Math.round(
+                                ((parseInt(project.blockchainData.totalSupply) - parseInt(project.blockchainData.availableSupply)) /
+                                  parseInt(project.blockchainData.totalSupply)) *
+                                  100
+                              )
+                            : project.progress
+                        }%`,
+                      }}
+                    ></div>
                   </div>
                 </dd>
               </div>

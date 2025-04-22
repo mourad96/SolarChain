@@ -3,8 +3,18 @@ import { body, param } from 'express-validator';
 import { investInProject, recordInvestment } from '../controllers/investment.controller';
 import { requireAuth, requireInvestor } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validate-request';
+import { logger } from '../utils/logger';
 
 const router = Router();
+
+// Debug middleware to log all requests
+router.use((req, res, next) => {
+  logger.info(`Investment route accessed: ${req.method} ${req.originalUrl}`, {
+    body: req.body,
+    headers: req.headers,
+  });
+  next();
+});
 
 // Invest in a project
 router.post(

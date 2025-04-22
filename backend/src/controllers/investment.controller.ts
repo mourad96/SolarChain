@@ -8,6 +8,12 @@ const blockchainService = new BlockchainService();
 
 export const investInProject = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    logger.info('Processing investment request', {
+      userId: req.user.id,
+      panelId: req.params.panelId,
+      shares: req.body.shares
+    });
+
     const { panelId } = req.params;
     const { shares } = req.body;
     const userId = req.user.id;
@@ -19,6 +25,7 @@ export const investInProject = async (req: AuthenticatedRequest, res: Response):
     });
 
     if (!user?.walletAddress) {
+      logger.warn('Investment failed: User has no wallet address', { userId });
       res.status(400).json({ error: 'User must connect a wallet before investing' });
       return;
     }
@@ -39,11 +46,13 @@ export const investInProject = async (req: AuthenticatedRequest, res: Response):
     });
 
     if (!panel) {
+      logger.warn('Investment failed: Panel not found', { panelId });
       res.status(404).json({ error: 'Panel not found' });
       return;
     }
 
     if (!panel.blockchainPanelId) {
+      logger.warn('Investment failed: Panel not registered on blockchain', { panelId });
       res.status(400).json({ error: 'Panel is not registered on blockchain yet' });
       return;
     }
@@ -54,6 +63,12 @@ export const investInProject = async (req: AuthenticatedRequest, res: Response):
       shares,
       user.walletAddress
     );
+
+    logger.info('Investment transaction data prepared', {
+      panelId,
+      shares,
+      tokenAddress: result.tokenAddress
+    });
 
     // Return the transaction data to the frontend for signing
     res.json({
@@ -70,16 +85,27 @@ export const investInProject = async (req: AuthenticatedRequest, res: Response):
 
 export const recordInvestment = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    logger.info('Recording investment', {
+      userId: req.user.id,
+      ...req.body
+    });
+
     const { panelId, sharesPurchased, transactionHash, tokenAddress } = req.body;
     const userId = req.user.id;
 
-    // Get panel details
-    const panel = await prisma.panel.findUnique({
-      where: { id: panelId },
+    // Get panel details - try both direct ID and blockchain ID
+    const panel = await prisma.panel.findFirst({
+      where: {
+        OR: [
+          { id: panelId },
+          { blockchainPanelId: panelId }
+        ]
+      },
       select: { id: true }
     });
 
     if (!panel) {
+      logger.warn('Recording investment failed: Panel not found', { panelId });
       res.status(404).json({ error: 'Panel not found' });
       return;
     }
@@ -93,6 +119,12 @@ export const recordInvestment = async (req: AuthenticatedRequest, res: Response)
         transactionHash,
         tokenAddress
       }
+    });
+
+    logger.info('Investment recorded successfully', {
+      investmentId: investment.id,
+      panelId,
+      userId
     });
 
     res.json({

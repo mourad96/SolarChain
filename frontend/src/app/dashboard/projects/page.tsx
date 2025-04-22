@@ -51,24 +51,28 @@ export default function ProjectsPage() {
         }
 
         const data = await response.json();
+        console.log('Raw API data:', data);
         
         // Process the data to identify mock fields
         const processedData = data.map((project: Project) => {
           console.log('Processing project:', project);
+          console.log('Blockchain data:', project.blockchainData);
           
           // Check if project has blockchain data
           const hasRealBlockchainData = project.blockchainData && !project.blockchainData.isMockData;
+          console.log('Has real blockchain data:', hasRealBlockchainData);
           
           // If has real blockchain data, mark fields as real
           if (hasRealBlockchainData) {
             return {
               ...project,
               isMockData: false,
-              isBlockchainVerified: true
+              isBlockchainVerified: true,
+              mockDataFields: [] // Clear any mock data fields
             };
           }
           
-          // Otherwise, force all projects to show mock data indicator for debugging
+          // Otherwise, mark as mock data
           return {
             ...project,
             isMockData: true,
@@ -76,6 +80,7 @@ export default function ProjectsPage() {
           };
         });
         
+        console.log('Processed data:', processedData);
         setProjects(processedData);
       } catch (error) {
         console.error('Error fetching projects:', error);
@@ -216,16 +221,38 @@ export default function ProjectsPage() {
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-gray-500">Funding Progress</span>
                       <span className="font-medium text-gray-900">
-                        {project.progress}%
-                        {project.mockDataFields?.includes('progress') && (
-                          <span className="ml-1 text-xs font-bold bg-amber-100 text-amber-800 px-1 py-0.5 rounded">(mock)</span>
+                        {project.blockchainData ? (
+                          <>
+                            {Math.round(
+                              ((parseInt(project.blockchainData.totalSupply) - parseInt(project.blockchainData.availableSupply)) /
+                                parseInt(project.blockchainData.totalSupply)) *
+                                100
+                            )}%
+                          </>
+                        ) : (
+                          <>
+                            {project.progress}%
+                            {project.mockDataFields?.includes('progress') && (
+                              <span className="ml-1 text-xs font-bold bg-amber-100 text-amber-800 px-1 py-0.5 rounded">(mock)</span>
+                            )}
+                          </>
                         )}
                       </span>
                     </div>
                     <div className="mt-2 overflow-hidden rounded-full bg-gray-200">
                       <div
                         className="h-2 rounded-full bg-blue-600"
-                        style={{ width: `${project.progress}%` }}
+                        style={{
+                          width: `${
+                            project.blockchainData
+                              ? Math.round(
+                                  ((parseInt(project.blockchainData.totalSupply) - parseInt(project.blockchainData.availableSupply)) /
+                                    parseInt(project.blockchainData.totalSupply)) *
+                                    100
+                                )
+                              : project.progress
+                          }%`,
+                        }}
                       />
                     </div>
                   </div>

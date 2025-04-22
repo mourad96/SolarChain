@@ -462,14 +462,16 @@ export class BlockchainService {
         // Get token details
         const tokenDetails = await shareTokenContract.getTokenDetails();
         console.log("tokenDetails", tokenDetails);
-        // Get available supply (total - held by registry or factory)
+        // Get total supply
         const totalSupply = tokenDetails[0].toString();
         
-        // Calculate available supply by checking registry's balance
-        const registryBalance = await shareTokenContract.balanceOf(this.registryContract.target);
-        console.log("shareTokenContract.balanceOf", registryBalance);
-        // Available supply is total supply minus what registry/factory holds
-        const availableSupply = (BigInt(totalSupply) - BigInt(registryBalance)).toString();
+        // Get available supply by checking TokenSale contract's balance
+        const tokenSaleContract = TokenSale__factory.connect(panel.saleContractAddress, this.provider);
+        const tokenSaleBalance = await shareTokenContract.balanceOf(panel.saleContractAddress);
+        console.log("TokenSale contract balance:", tokenSaleBalance);
+        
+        // Available supply is the TokenSale contract's balance
+        const availableSupply = tokenSaleBalance.toString();
 
         // Get token price from TokenSale contract
         const price = await this.getTokenPrice(panel.saleContractAddress);

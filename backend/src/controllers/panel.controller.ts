@@ -362,7 +362,20 @@ export class PanelController {
         const panelDetails = await Promise.all(panelSerialNumbers.map(async (serialNumber) => {
           try {
             console.log("serialNumber", serialNumber);
-            return await this.blockchainService.getPanelFromBlockchain(serialNumber);
+            const panelData = await this.blockchainService.getPanelFromBlockchain(serialNumber);
+            const blockchainData = await this.blockchainService.getPanelById(panelData.id);
+            return {
+              ...panelData,
+              blockchainData: {
+                tokenId: blockchainData.tokenId,
+                totalSupply: blockchainData.totalSupply,
+                availableSupply: blockchainData.availableSupply,
+                isMockData: blockchainData.isMockData || false,
+                saleContractAddress: blockchainData.saleContractAddress,
+                shareTokenAddress: blockchainData.shareTokenAddress
+              },
+              isBlockchainVerified: !blockchainData.isMockData
+            };
           } catch (error) {
             const errorMessage = error.message && error.message.includes('not found')
               ? `Panel exists in database but not on blockchain yet (${error.message})`
