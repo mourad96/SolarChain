@@ -6,6 +6,7 @@ import { logger } from '../utils/logger';
 import { ShareToken__factory, DividendDistributor__factory, SolarPanelRegistry__factory } from '../typechain-types';
 import { JsonValue } from '@prisma/client/runtime/library';
 import { v4 as uuidv4 } from 'uuid';
+import { BlockchainService } from '../services/blockchain.service';
 
 // Define our own interfaces based on the database schema
 interface Panel {
@@ -404,7 +405,8 @@ export const listPanels = async (req: Request, res: Response): Promise<void> => 
 
 export const getUserTokens = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { userId } = req.params;
+    const userId = (req as any).user.id;
+    const { panelId } = req.params; // This will be undefined for the root path
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.walletAddress) {
@@ -412,25 +414,41 @@ export const getUserTokens = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // Get tokens using raw SQL
-    const tokens = await prisma.$queryRaw<ShareToken[]>`
-      SELECT t.*, p.*
-      FROM share_tokens t
-      LEFT JOIN panels p ON t."panelId" = p.id
-      WHERE t."holderBalances"::jsonb ? ${user.walletAddress}
-      AND (t."holderBalances"::jsonb->${user.walletAddress})::int > 0
-    `;
+    // Build the SQL query based on whether we have a panelId
+    let tokens;
+    if (panelId) {
+      // Get tokens for a specific panel
+      tokens = await prisma.$queryRaw<ShareToken[]>`
+        SELECT t.*, p.*
+        FROM share_tokens t
+        LEFT JOIN panels p ON t."panelId" = p.id
+        WHERE t."panelId" = ${panelId}
+        AND t."holderBalances"::jsonb ? ${user.walletAddress}
+        AND (t."holderBalances"::jsonb->${user.walletAddress})::int > 0
+      `;
+    } else {
+      // Get all tokens for the user
+      tokens = await prisma.$queryRaw<ShareToken[]>`
+        SELECT t.*, p.*
+        FROM share_tokens t
+        LEFT JOIN panels p ON t."panelId" = p.id
+        WHERE t."holderBalances"::jsonb ? ${user.walletAddress}
+        AND (t."holderBalances"::jsonb->${user.walletAddress})::int > 0
+      `;
+    }
 
     // Map tokens to expected structure
     const processedTokens = tokens.map((token: any) => ({
       id: token.id,
       panelId: token.panelId,
+      panelName: token.name || `Panel ${token.panelId}`, // Add panel name
       totalShares: token.totalShares,
       onChainTokenId: token.onChainTokenId,
       holderBalances: token.holderBalances,
       isActive: token.isActive,
       createdAt: token.createdAt,
       updatedAt: token.updatedAt,
+      amount: token.holderBalances[user.walletAddress] || 0, // Add user's token amount
       panel: {
         id: token.panelId,
         name: token.name,
@@ -512,8 +530,8 @@ export const distributeDividends = async (req: Request, res: Response): Promise<
       return;
     }
 
-    // Convert amount to proper format (USDC has 18 decimals)
-    const usdcDecimals = 18;
+    // Convert amount to proper format (USDC has 6 decimals)
+    const usdcDecimals = 6;
     const distributionAmount = ethers.parseUnits(amount.toString(), usdcDecimals);
     console.log('Distribution amount in wei:', distributionAmount.toString());
 
@@ -615,18 +633,31 @@ export const getUnclaimedDividends = async (req: Request, res: Response): Promis
 export const claimDividends = async (req: Request, res: Response): Promise<void> => {
   try {
     const { panelId } = req.body;
-    const userId = (req as any).user.userId;
+    
+    // Check if user is authenticated
+    if (!req.user || !req.user.id) {
+      res.status(401).json({ message: 'User not authenticated' });
+      return;
+    }
 
-    // Get user
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    // Get user with proper ID field
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id }
+    });
+
     if (!user || !user.walletAddress) {
       res.status(400).json({ message: 'User must connect wallet first' });
       return;
     }
 
-    // Get panel
-    const panel = await prisma.panel.findUnique({
-      where: { id: panelId },
+    // Try to find panel by either id or blockchainPanelId
+    const panel = await prisma.panel.findFirst({
+      where: {
+        OR: [
+          { id: panelId },
+          { blockchainPanelId: panelId }
+        ]
+      }
     });
 
     if (!panel) {
@@ -634,60 +665,114 @@ export const claimDividends = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    if (!dividendDistributor) {
-      res.status(503).json({ message: 'Blockchain features are currently unavailable' });
+    if (!panel.blockchainPanelId) {
+      res.status(400).json({ message: 'Panel is not registered on blockchain' });
       return;
     }
 
-    // Check if user has unclaimed dividends
-    const unclaimedDividends = await dividendDistributor.getUnclaimedDividends(
-      panel.blockchainPanelId || '',
+    // Initialize blockchain service
+    const blockchainService = new BlockchainService();
+
+    // Get unclaimed dividends amount
+    const unclaimedDividends = await blockchainService.getUnclaimedDividends(
+      panel.blockchainPanelId,
       user.walletAddress
     );
-
-    if (unclaimedDividends.toString() === '0') {
-      res.status(400).json({ message: 'No unclaimed dividends available' });
-      return;
-    }
-
-    // Claim dividends on blockchain
-    const tx = await dividendDistributor.claimDividends(panel.blockchainPanelId || '');
-    const receipt = await tx.wait();
-
-    if (!receipt) {
-      res.status(500).json({ message: 'Failed to get transaction receipt' });
-      return;
-    }
-
-    // Get dividend claimed event
-    const claimedEvent = receipt.logs.find(log => 
-      log.topics[0] === dividendDistributor.interface.getEvent('DividendClaimed').topicHash
-    );
-
-    if (!claimedEvent) {
-      res.status(500).json({ message: 'Failed to find dividend claimed event' });
-      return;
-    }
-
-    const parsedEvent = dividendDistributor.interface.parseLog({
-      topics: [...claimedEvent.topics],
-      data: claimedEvent.data,
-    });
-
-    // USDC has 6 decimals
-    const usdcDecimals = 6;
+    const unclaimedAmount = ethers.formatUnits(unclaimedDividends, 6); // USDC has 6 decimals
+    console.log('Unclaimed dividends amount:', unclaimedAmount);
+    // Get transaction data for claiming dividends
+    const transactionData = await blockchainService.claimDividends(panel.blockchainPanelId);
 
     res.status(200).json({
-      message: 'Dividends claimed successfully',
-      claim: {
-        panelId,
-        amount: ethers.formatUnits(parsedEvent?.args.amount, usdcDecimals),
-        userAddress: user.walletAddress,
-        transactionHash: receipt.hash,
+      message: 'Transaction data prepared successfully',
+      transactions: {
+        claim: transactionData
       },
+      claim: {
+        amount: unclaimedAmount,
+        panelId: panel.blockchainPanelId
+      }
     });
   } catch (error) {
     logger.error('Error in claimDividends:', error);
+    res.status(500).json({ message: 'Internal server error', error: (error as any).message });
+  }
+};
+
+export const getUnclaimedDividendsForPanels = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Check if user is authenticated
+    if (!req.user || !req.user.id) {
+      res.status(401).json({ message: 'User not authenticated' });
+      return;
+    }
+
+    // Get user with proper ID field
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id }
+    });
+
+    if (!user || !user.walletAddress) {
+      res.status(400).json({ message: 'User must connect wallet first' });
+      return;
+    }
+
+    // Get all panels with blockchain IDs
+    const panels = await prisma.panel.findMany({
+      where: {
+        blockchainPanelId: { not: null }
+      }
+    });
+
+    console.log('Found panels:', panels);
+
+    // Initialize blockchain service
+    const blockchainService = new BlockchainService();
+
+    // Get unclaimed dividends for each panel
+    const unclaimedDividends = await Promise.all(
+      panels.map(async (panel) => {
+        try {
+          if (!panel.blockchainPanelId) return null;
+          
+          console.log('Getting unclaimed dividends for panel:', {
+            id: panel.id,
+            blockchainPanelId: panel.blockchainPanelId,
+            userWallet: user.walletAddress
+          });
+          
+          const unclaimed = await blockchainService.getUnclaimedDividends(
+            panel.blockchainPanelId,
+            user.walletAddress
+          );
+          
+          console.log('Unclaimed dividends result:', {
+            panelId: panel.id,
+            blockchainPanelId: panel.blockchainPanelId,
+            unclaimed: unclaimed.toString(),
+            formattedAmount: ethers.formatUnits(unclaimed, 6)
+          });
+          
+          return {
+            panelId: panel.id,
+            blockchainPanelId: panel.blockchainPanelId,
+            unclaimedAmount: ethers.formatUnits(unclaimed, 6) // USDC has 6 decimals
+          };
+        } catch (error) {
+          console.error(`Error getting unclaimed dividends for panel ${panel.id}:`, error);
+          return null;
+        }
+      })
+    );
+
+    // Filter out null values and send response
+    const validDividends = unclaimedDividends.filter(dividend => dividend !== null);
+    
+    console.log('Sending response:', validDividends);
+    
+    res.json(validDividends);
+  } catch (error) {
+    logger.error('Error in getUnclaimedDividendsForPanels:', error);
     res.status(500).json({ message: 'Internal server error', error: (error as any).message });
   }
 }; 

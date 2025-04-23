@@ -98,7 +98,7 @@ export default function TokensPage() {
     
     try {
       // Log fetch attempt with API URL
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL}/api/v1/tokens`;
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL}/api/v1/tokens/blockchain/all`;
       console.log(`Attempting to fetch tokens from: ${apiUrl}`);
       
       const response = await fetch(apiUrl, {

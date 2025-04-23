@@ -21,11 +21,10 @@ router.use('/tokens', tokenRouter);
 router.use('/dashboard', dashboardRoutes);  
 router.use('/investments', investmentRoutes);  
 
-// Right before you export router:
+export default router;  
+
+// Catch-all route for unmatched paths
 router.all('*', (req, res) => {
   console.log('Reached the catch-all. Method:', req.method, 'Path:', req.originalUrl);
   res.status(404).send('Not Found');
 });
-
-  
-export default router;  

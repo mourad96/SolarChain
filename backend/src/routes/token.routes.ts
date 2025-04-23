@@ -9,35 +9,18 @@ import {
   getTokenHolders,
   distributeDividends,
   claimDividends,
-  getUnclaimedDividends
+  getUnclaimedDividends,
+  getUnclaimedDividendsForPanels
 } from '../controllers/token.controller';
 import { validateRequest } from '../middleware/validate-request';
 import { requireAuth } from '../middleware/auth.middleware';
 
 const router = Router();
 
-// Get all panels for the authenticated user
-router.get('/', requireAuth, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+// Get unclaimed dividends for all panels
+router.get('/unclaimed-dividends', requireAuth, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    await listPanels(req, res);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get a specific token by ID
-router.get('/:id', requireAuth, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    await getTokenDetails(req, res);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get tokens for a specific panel
-router.get('/panel/:panelId', requireAuth, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    await getUserTokens(req, res);
+    await getUnclaimedDividendsForPanels(req, res);
   } catch (error) {
     next(error);
   }
@@ -88,24 +71,6 @@ router.post(
   }
 );
 
-// Get token holders for a panel
-router.get('/panel/:panelId/holders', requireAuth, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    await getTokenHolders(req, res);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get token transaction history
-router.get('/:id/history', requireAuth, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    await getTokenDetails(req, res);
-  } catch (error) {
-    next(error);
-  }
-});
-
 // Distribute dividends
 router.post(
   '/distribute-dividends',
@@ -145,7 +110,7 @@ router.post(
   }
 );
 
-// Get unclaimed dividends
+// Get unclaimed dividends for a specific panel
 router.get(
   '/panel/:panelId/unclaimed-dividends',
   requireAuth,
@@ -161,5 +126,41 @@ router.get(
     }
   }
 );
+
+// Get token holders for a panel
+router.get('/panel/:panelId/holders', requireAuth, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    await getTokenHolders(req, res);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get tokens for a specific panel
+router.get('/panel/:panelId', requireAuth, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    await getUserTokens(req, res);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get all panels for the authenticated user
+router.get('/blockchain/all', requireAuth, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    await listPanels(req, res);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get a specific token by ID
+router.get('/:id', requireAuth, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    await getTokenDetails(req, res);
+  } catch (error) {
+    next(error);
+  }
+});
 
 export { router as tokenRouter }; 

@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { logger } from '../utils/logger';
-import { SolarPanelRegistry__factory, SolarPanelFactory__factory, ShareToken__factory, MockERC20__factory, TokenSale__factory } from '../typechain-types';
+import { SolarPanelRegistry__factory, SolarPanelFactory__factory, ShareToken__factory, MockERC20__factory, TokenSale__factory, DividendDistributor__factory } from '../typechain-types';
 import type { SolarPanelRegistry, SolarPanelFactory } from '../typechain-types';
 
 // Define Panel interface to match expected structure
@@ -28,11 +28,14 @@ interface ISolarPanelFactory {
   connect(signer: ethers.Signer): ISolarPanelFactory;
 }
 
+const USDC_DECIMALS = 18;
+
 export class BlockchainService {
   private provider: ethers.JsonRpcProvider;
   private registryContract: SolarPanelRegistry | null = null;
   private factoryContract: SolarPanelFactory | null = null;
   private paymentTokenContract: any = null; // Add payment token contract instance
+  private dividendDistributorContract: any = null;
   private isInitialized: boolean = false;
   private isLocalNetwork: boolean = false;
   private enableDevMode: boolean = false;
@@ -43,6 +46,7 @@ export class BlockchainService {
       const registryAddress = process.env.SOLAR_PANEL_REGISTRY_ADDRESS;
       const factoryAddress = process.env.SOLAR_PANEL_FACTORY_ADDRESS;
       const paymentTokenAddress = process.env.MOCK_ERC20_ADDRESS;
+      const dividendDistributorAddress = process.env.DIVIDEND_DISTRIBUTOR_ADDRESS;
       
       // Check if we're using a local network
       this.isLocalNetwork = rpcUrl.includes('127.0.0.1') || rpcUrl.includes('localhost');
@@ -94,6 +98,18 @@ export class BlockchainService {
         });
       } else {
         logger.warn('Missing blockchain configuration: MOCK_ERC20_ADDRESS not set or empty');
+      }
+
+      // Initialize dividend distributor contract if address is provided and not empty
+      if (dividendDistributorAddress && dividendDistributorAddress.trim() !== '') {
+        this.dividendDistributorContract = DividendDistributor__factory.connect(dividendDistributorAddress, this.provider);
+        
+        logger.info('Dividend distributor contract initialized successfully', {
+          dividendDistributorAddress,
+          network: this.isLocalNetwork ? 'local' : 'testnet'
+        });
+      } else {
+        logger.warn('Missing blockchain configuration: DIVIDEND_DISTRIBUTOR_ADDRESS not set or empty');
       }
     } catch (error) {
       logger.error('Failed to initialize blockchain service:', error);
@@ -538,7 +554,7 @@ export class BlockchainService {
       const price = await tokenSaleContract.price();
       
       // Convert price from wei to USDC (assuming 18 decimals)
-      const priceInUSDC = ethers.formatUnits(price, 18);
+      const priceInUSDC = ethers.formatUnits(price, USDC_DECIMALS);
       
       return priceInUSDC;
     } catch (error) {
@@ -652,7 +668,7 @@ export class BlockchainService {
       const saleEndTime = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60);
 
       // Convert capacity to Wei (18 decimals)
-      const capacityInWei = ethers.parseUnits(panel.capacity.toString(), 18);
+      const capacityInWei = ethers.parseUnits(panel.capacity.toString(), USDC_DECIMALS);
 
       logger.info('Creating panel with shares on blockchain:', {
         externalId: panel.id,
@@ -1090,7 +1106,7 @@ export class BlockchainService {
       // Convert price from USD to token units (assuming 18 decimals for USDC)
       const price = parseFloat(priceString.replace(' (mock)', ''));
       const totalCost = price * amount;
-      const totalCostInWei = ethers.parseUnits(totalCost.toFixed(6), 18);
+      const totalCostInWei = ethers.parseUnits(totalCost.toFixed(6), USDC_DECIMALS);
       
       logger.info('Investment transaction details:', {
         panelId,
@@ -1136,6 +1152,103 @@ export class BlockchainService {
     } catch (error) {
       logger.error('Error investing in project:', error);
       throw new Error(`Failed to invest in project: ${error.message}`);
+    }
+  }
+
+  /**
+   * Claims dividends for a specific panel
+   * @param panelId The blockchain ID of the panel
+   * @param userAddress The wallet address of the user claiming dividends
+   * @returns Transaction data for claiming dividends
+   */
+  async claimDividends(panelId: string): Promise<{
+    to: string;
+    data: string;
+    value: string;
+  }> {
+    try {
+      this.checkInitialization();
+
+      if (!this.dividendDistributorContract) {
+        throw new Error('Dividend distributor contract not properly initialized');
+      }
+
+      // Get private key for signing transactions
+      const privateKey = process.env.PRIVATE_KEY;
+      if (!privateKey) {
+        throw new Error('Missing private key for blockchain transactions');
+      }
+
+      // Create a wallet to sign transactions
+      const wallet = new ethers.Wallet(privateKey, this.provider);
+      
+      // Connect to the contract with the signer
+      const distributorWithSigner = this.dividendDistributorContract.connect(wallet);
+
+      // Prepare the claim dividends transaction data
+      const data = distributorWithSigner.interface.encodeFunctionData('claimDividends', [panelId]);
+
+      logger.info('Prepared claim dividends transaction data:', {
+        panelId,
+        contractAddress: this.dividendDistributorContract.target,
+        network: this.isLocalNetwork ? 'local' : 'testnet'
+      });
+
+      // Return the transaction data for the frontend to execute
+      return {
+        to: this.dividendDistributorContract.target,
+        data: data,
+        value: '0x0'
+      };
+    } catch (error) {
+      logger.error('Error preparing claim dividends transaction:', error);
+      throw new Error(`Failed to prepare claim dividends transaction: ${error.message}`);
+    }
+  }
+
+  /**
+   * Gets unclaimed dividends for a holder of a specific panel
+   * @param panelId The blockchain ID of the panel
+   * @param holderAddress The address of the holder
+   * @returns The amount of unclaimed dividends in wei
+   */
+  async getUnclaimedDividends(panelId: string, holderAddress: string): Promise<bigint> {
+    try {
+      this.checkInitialization();
+
+      if (!this.dividendDistributorContract) {
+        throw new Error('Dividend distributor contract not properly initialized');
+      }
+
+      logger.info('Getting unclaimed dividends:', {
+        panelId,
+        holderAddress,
+        contractAddress: this.dividendDistributorContract.target,
+        network: this.isLocalNetwork ? 'local' : 'testnet'
+      });
+
+      // Get unclaimed dividends
+      const unclaimedDividends = await this.dividendDistributorContract.getUnclaimedDividends(
+        panelId,
+        holderAddress
+      );
+      
+      logger.info('Unclaimed dividends result:', {
+        panelId,
+        holderAddress,
+        unclaimedDividends: unclaimedDividends.toString(),
+        formattedAmount: ethers.formatUnits(unclaimedDividends, 6)
+      });
+
+      return unclaimedDividends;
+    } catch (error) {
+      logger.error('Error getting unclaimed dividends:', {
+        error,
+        panelId,
+        holderAddress,
+        network: this.isLocalNetwork ? 'local' : 'testnet'
+      });
+      throw new Error(`Failed to get unclaimed dividends: ${error.message}`);
     }
   }
 }
