@@ -7,6 +7,17 @@ import DashboardHeader from '@/components/dashboard/DashboardHeader';
 import Link from 'next/link';
 import Cookies from 'js-cookie';
 
+declare global {
+  interface Window {
+    ethereum?: {
+      isMetaMask?: boolean;
+      request: (args: { method: string; params?: any[] }) => Promise<any>;
+      on: (eventName: string, callback: (...args: any[]) => void) => void;
+      removeListener: (eventName: string, callback: (...args: any[]) => void) => void;
+    };
+  }
+}
+
 interface Token {
   id: string;
   panelId: string;
@@ -15,6 +26,14 @@ interface Token {
   mintedAt: string;
   owner: string;
   unclaimedDividends?: number;
+  totalShares?: string;
+  blockchainPanelId?: string;
+  blockchainData?: {
+    tokenId: string;
+    totalSupply: string;
+    availableSupply: string;
+    isMockData?: boolean;
+  } | null;
 }
 
 interface TransferForm {
@@ -165,20 +184,32 @@ export default function TokensPage() {
     setIsLoading(true);
     
     try {
-      // Call the real API
+      // Check if MetaMask is installed
+      if (!window.ethereum) {
+        toast.error('Please install MetaMask to distribute dividends');
+        return;
+      }
+
+      // Request account access
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      const userAddress = accounts[0];
+
+      // Call the API to get transaction data
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/tokens/distribute-dividends`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
-        body: JSON.stringify(dividendForm),
+        body: JSON.stringify({
+          panelId: selectedToken.blockchainPanelId || selectedToken.id,
+          amount: dividendForm.amount
+        }),
       });
 
       if (!response.ok) {
-        // If real API fails, show error
         const errorText = await response.text();
-        let errorMessage = 'Failed to distribute dividends';
+        let errorMessage = 'Failed to prepare transaction';
         
         try {
           const errorData = JSON.parse(errorText);
@@ -186,7 +217,6 @@ export default function TokensPage() {
             errorMessage = errorData.message;
           }
         } catch (e) {
-          // If parsing fails, use the error text directly
           if (errorText) {
             errorMessage = errorText;
           }
@@ -198,11 +228,82 @@ export default function TokensPage() {
       }
       
       const data = await response.json();
-      console.log('Distribution successful:', data);
+      console.log('Transaction data received:', data);
+
+      if (!window.ethereum) {
+        throw new Error('MetaMask not available');
+      }
+
+      // Execute approve transaction
+      const approveTx = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from: userAddress,
+          to: data.transactions.approve.to,
+          data: data.transactions.approve.data,
+          value: data.transactions.approve.value
+        }]
+      });
+
+      console.log('Approve transaction sent:', approveTx);
+      toast.success('Approving USDC spend...');
+
+      // Wait for approve transaction to be mined
+      await new Promise((resolve) => {
+        const checkInterval = setInterval(async () => {
+          if (!window.ethereum) {
+            clearInterval(checkInterval);
+            resolve(null);
+            return;
+          }
+          const receipt = await window.ethereum.request({
+            method: 'eth_getTransactionReceipt',
+            params: [approveTx]
+          });
+          if (receipt) {
+            clearInterval(checkInterval);
+            resolve(receipt);
+          }
+        }, 1000);
+      });
+
+      // Execute distribute transaction
+      const distributeTx = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from: userAddress,
+          to: data.transactions.distribute.to,
+          data: data.transactions.distribute.data,
+          value: data.transactions.distribute.value
+        }]
+      });
+
+      console.log('Distribute transaction sent:', distributeTx);
+      toast.success('Distributing dividends...');
+
+      // Wait for distribute transaction to be mined
+      await new Promise((resolve) => {
+        const checkInterval = setInterval(async () => {
+          if (!window.ethereum) {
+            clearInterval(checkInterval);
+            resolve(null);
+            return;
+          }
+          const receipt = await window.ethereum.request({
+            method: 'eth_getTransactionReceipt',
+            params: [distributeTx]
+          });
+          if (receipt) {
+            clearInterval(checkInterval);
+            resolve(receipt);
+          }
+        }, 1000);
+      });
+
       toast.success('Dividends distributed successfully');
     } catch (error) {
       console.error('Error in distributing dividends:', error);
-      // Error toast already shown
+      toast.error(error instanceof Error ? error.message : 'Failed to distribute dividends');
     } finally {
       // Reset form and UI state
       setIsDistributing(false);
@@ -312,7 +413,7 @@ export default function TokensPage() {
                           {token.panelName}
                         </h4>
                         <p className="mt-1 text-sm text-gray-500">
-                          Total Shares: {token.amount}
+                          Total Shares: {token.totalShares || token.blockchainData?.totalSupply || '0'}
                         </p>
                         {token.unclaimedDividends && token.unclaimedDividends > 0 && (
                           <p className="mt-1 text-sm font-medium text-green-600">
@@ -327,7 +428,7 @@ export default function TokensPage() {
                               onClick={() => {
                                 setSelectedToken(token);
                                 setDividendForm({
-                                  panelId: token.panelId,
+                                  panelId: token.blockchainPanelId || token.id, // Use blockchainPanelId if available
                                   amount: 0,
                                 });
                                 setIsDistributing(true);

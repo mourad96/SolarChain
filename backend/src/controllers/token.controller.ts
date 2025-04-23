@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import { prisma } from '../services/prisma.service';
 import { config } from '../config';
 import { logger } from '../utils/logger';
-import { ShareToken__factory, DividendDistributor__factory } from '../typechain-types';
+import { ShareToken__factory, DividendDistributor__factory, SolarPanelRegistry__factory } from '../typechain-types';
 import { JsonValue } from '@prisma/client/runtime/library';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -43,6 +43,7 @@ let provider: ethers.JsonRpcProvider | undefined;
 let wallet: ethers.Wallet | undefined;
 let shareToken: ReturnType<typeof ShareToken__factory.connect> | undefined;
 let dividendDistributor: ReturnType<typeof DividendDistributor__factory.connect> | undefined;
+let solarPanelRegistry: ReturnType<typeof SolarPanelRegistry__factory.connect> | undefined;
 
 try {
   if (config.blockchain.rpcUrl && config.blockchain.privateKey) {
@@ -59,6 +60,13 @@ try {
     if (config.blockchain.contracts.dividendDistributor) {
       dividendDistributor = DividendDistributor__factory.connect(
         config.blockchain.contracts.dividendDistributor,
+        wallet
+      );
+    }
+
+    if (config.blockchain.contracts.solarPanelRegistry) {
+      solarPanelRegistry = SolarPanelRegistry__factory.connect(
+        config.blockchain.contracts.solarPanelRegistry,
         wallet
       );
     }
@@ -285,9 +293,9 @@ export const getTokenDetails = async (req: Request, res: Response): Promise<void
   }
 };
 
-export const listTokens = async (req: Request, res: Response): Promise<void> => {
+export const listPanels = async (req: Request, res: Response): Promise<void> => {
   try {
-    console.log('======== BEGIN listTokens FUNCTION ========');
+    console.log('======== BEGIN listPanels FUNCTION ========');
     
     // Get user ID from the request (if authenticated)
     const userId = (req as any).user?.id;
@@ -304,291 +312,92 @@ export const listTokens = async (req: Request, res: Response): Promise<void> => 
         role: user.role
       } : 'null');
     } else {
-      console.log('No user ID in request - will return all tokens for debugging');
+      console.log('No user ID in request - will return all panels for debugging');
     }
-    
-    // Get tokens from database using raw SQL
-    console.log('Fetching tokens from database...');
-    const dbTokens = await prisma.$queryRaw<ShareToken[]>`
-      SELECT t.*, p.*, o.*
-      FROM share_tokens t
-      LEFT JOIN panels p ON t."panelId" = p.id
-      LEFT JOIN "User" o ON p."ownerId" = o.id
-      ORDER BY t."createdAt" DESC
-    `;
 
-    // Process the raw SQL results to match the expected structure
-    const processedTokens = dbTokens.map((token: any) => {
-      // Raw SQL joins return duplicate column names, so we need to be explicit
-      // about which properties belong to which model
-      return {
-        id: token.id,
-        panelId: token.panelId,
-        totalShares: token.totalShares,
-        onChainTokenId: token.onChainTokenId,
-        holderBalances: token.holderBalances,
-        isActive: token.isActive,
-        createdAt: token.createdAt,
-        updatedAt: token.updatedAt,
-        panel: {
-          id: token.panelId, // Use panelId as the panel id
-          name: token.name,
-          location: token.location,
-          capacity: token.capacity,
-          status: token.status,
-          ownerId: token.ownerId,
-          blockchainTxHash: token.blockchainTxHash,
-          blockchainPanelId: token.blockchainPanelId,
-          blockchainTokenAddress: token.blockchainTokenAddress,
-          createdAt: token.createdAt,
-          updatedAt: token.updatedAt,
-          owner: {
-            id: token.ownerId,
-            name: token.name,
-            email: token.email,
-            walletAddress: token.walletAddress,
-            role: token.role
-          }
-        }
-      } as ShareToken;
-    });
-
-    console.log(`Found ${processedTokens.length} tokens in database`);
-    if (processedTokens.length > 0) {
-      console.log('First database token:', {
-        id: processedTokens[0].id,
-        panelId: processedTokens[0].panel?.id,
-        totalShares: processedTokens[0].totalShares,
-        holderBalances: processedTokens[0].holderBalances
-      });
-    } else {
-      // Check if there are any panels at all
-      const panels = await prisma.panel.findMany();
-      console.log(`Found ${panels.length} panels in database`);
-      if (panels.length > 0) {
-        console.log('First panel:', {
-          id: panels[0].id,
-          name: panels[0].name,
-          blockchainPanelId: panels[0].blockchainPanelId
-        });
-      }
-      
-      // Check if there are any users with wallet addresses
-      const usersWithWallets = await prisma.$queryRaw<any[]>`
-        SELECT * FROM "User" WHERE "walletAddress" IS NOT NULL
-      `;
-      console.log(`Found ${usersWithWallets.length} users with wallet addresses`);
+    if (!user?.walletAddress) {
+      res.status(400).json({ message: 'User must connect wallet first' });
+      return;
     }
-    
-    // If no user is authenticated or debugging is needed, return all tokens
-    if (!userId) {
-      console.log('No authenticated user, returning all tokens for debugging');
-      res.json(processedTokens);
+
+    if (!solarPanelRegistry) {
+      res.status(503).json({ message: 'Blockchain features are currently unavailable' });
       return;
     }
     
-    // If blockchain connection is available, try to enhance with blockchain data
-    let enhancedTokens = [...processedTokens];
-    
-    console.log('Blockchain connection available?', {
-      shareToken: !!shareToken,
-      provider: !!provider,
-      userWalletAddress: user?.walletAddress
-    });
-    
-    if (shareToken && provider && user?.walletAddress) {
+    // Get panels owned by the user from the blockchain
+    const panelIds = await solarPanelRegistry.getPanelsByOwner(user.walletAddress);
+    console.log(`Found ${panelIds.length} panels owned by user`);
+
+    // Get panel details from blockchain and database
+    const panels = await Promise.all(panelIds.map(async (panelId) => {
       try {
-        console.log(`Fetching blockchain token data for wallet ${user.walletAddress}`);
-        
-        // Get panels to check for tokens
-        const panels = await prisma.panel.findMany();
-        console.log(`Found ${panels.length} panels to check for tokens`);
-        
-        for (const panel of panels) {
-          console.log(`Checking panel ${panel.id}, blockchainPanelId: ${panel.blockchainPanelId}`);
-          
-          if (panel.blockchainPanelId) {
-            try {
-              console.log(`Processing panel with blockchainPanelId: ${panel.blockchainPanelId}`);
-              
-              // Get panel token data from blockchain if possible
-              if (!shareToken) {
-                console.log('ShareToken contract not available, skipping panel');
-                continue;
-              }
-              
-              try {
-                console.log('Checking if user has token balance');
-                
-                // Check if the user has any balance for this token
-                try {
-                  console.log(`Calling getHolderBalance(${user.walletAddress}) for panel ${panel.id}`);
-                  const holderBalance = await shareToken.getHolderBalance(user.walletAddress);
-                  console.log(`User balance for token: ${holderBalance.toString()}`);
-                  
-                  if (holderBalance && holderBalance.toString() !== '0') {
-                    console.log(`User has positive balance: ${holderBalance.toString()}`);
-                    
-                    // Find if we already have this token in our results
-                    const existingTokenIndex = enhancedTokens.findIndex(
-                      t => t.panel.id === panel.id
-                    );
-                    console.log(`Token exists in results? ${existingTokenIndex !== -1}`);
-                    
-                    if (existingTokenIndex === -1) {
-                      console.log(`Creating new token object for panel ${panel.id}`);
-                      
-                      // Create a temporary token object for the response
-                      const newToken: ShareToken = {
-                        id: `bc-${panel.blockchainPanelId}`,
-                        panelId: panel.id,
-                        totalShares: 100,
-                        onChainTokenId: panel.blockchainPanelId?.toString() || '',
-                        holderBalances: {
-                          [user.walletAddress]: parseInt(holderBalance.toString())
-                        } as JsonValue,
-                        isActive: true,
-                        createdAt: new Date(),
-                        updatedAt: new Date(),
-                        panel,
-                      };
-                      
-                      console.log('Adding new token to results:', {
-                        id: newToken.id,
-                        panelId: newToken.panelId,
-                        holderBalance: (newToken.holderBalances as HolderBalances)[user.walletAddress] || 0
-                      });
-                      
-                      enhancedTokens.push(newToken);
-                    } else if (existingTokenIndex !== -1) {
-                      console.log(`Updating existing token at index ${existingTokenIndex}`);
-                      
-                      // Update the existing token with blockchain data
-                      const token = enhancedTokens[existingTokenIndex];
-                      
-                      // Only update if there's a difference
-                      if (parseInt(holderBalance.toString()) > 0 && 
-                          token.holderBalances && 
-                          user.walletAddress && 
-                          (!token.holderBalances[user.walletAddress] || 
-                           token.holderBalances[user.walletAddress] !== parseInt(holderBalance.toString()))) {
-                        
-                        console.log(`Updating token ${token.id} with new balance: ${holderBalance.toString()}`);
-                        
-                        // Update the holder balances
-                        token.holderBalances = {
-                          ...JSON.parse(JSON.stringify(token.holderBalances)),
-                          [user.walletAddress]: parseInt(holderBalance.toString())
-                        };
-                        
-                        // Save the updated token to the database
-                        console.log('Saving updated token to database');
-                        await prisma.shareToken.update({
-                          where: { id: token.id },
-                          data: {
-                            holderBalances: token.holderBalances,
-                          },
-                        });
-                      } else {
-                        console.log('No balance update needed for existing token');
-                      }
-                    }
-                  } else {
-                    console.log('User has zero balance for this token, skipping');
-                  }
-                } catch (balanceError) {
-                  console.error(`Error calling getHolderBalance for wallet ${user.walletAddress}:`, balanceError);
-                }
-                
-                // If unclaimed dividends are available and dividendDistributor is defined
-                if (dividendDistributor && panel.blockchainPanelId && user.walletAddress) {
-                  try {
-                    console.log(`Checking unclaimed dividends for panel ${panel.id}, blockchainPanelId: ${panel.blockchainPanelId}`);
-                    const unclaimedDividends = await dividendDistributor.getUnclaimedDividends(
-                      panel.blockchainPanelId,
-                      user.walletAddress
-                    );
-                    
-                    console.log(`Unclaimed dividends: ${unclaimedDividends.toString()}`);
-                    
-                    // Find token in enhanced tokens and add unclaimed dividends info
-                    const tokenIndex = enhancedTokens.findIndex(
-                      t => t.panel.id === panel.id
-                    );
-                    
-                    if (tokenIndex !== -1 && unclaimedDividends.toString() !== '0') {
-                      console.log(`Adding unclaimed dividends to token at index ${tokenIndex}`);
-                      
-                      // Attach unclaimed dividends info to the token
-                      const token = enhancedTokens[tokenIndex];
-                      (token as any).unclaimedDividends = ethers.formatUnits(unclaimedDividends, 6); // USDC has 6 decimals
-                      console.log(`Set unclaimed dividends: ${(token as any).unclaimedDividends}`);
-                    } else {
-                      console.log(`Token not found or no unclaimed dividends`);
-                    }
-                  } catch (dividendError) {
-                    console.error(`Error fetching unclaimed dividends for panel ${panel.id}:`, dividendError);
-                  }
-                } else {
-                  console.log('Dividend distributor not available or missing parameters', {
-                    dividendDistributor: !!dividendDistributor,
-                    blockchainPanelId: panel.blockchainPanelId,
-                    walletAddress: user?.walletAddress
-                  });
-                }
-              } catch (tokenMethodError) {
-                console.error(`Error calling token methods for panel ${panel.id}:`, tokenMethodError);
-              }
-            } catch (tokenError) {
-              console.error(`Error processing blockchain token for panel ${panel.id}:`, tokenError);
-            }
-          } else {
-            console.log(`Panel ${panel.id} has no blockchainPanelId, skipping`);
-          }
+        // Get panel data from blockchain
+        const panel = await solarPanelRegistry.panels(panelId);
+        console.log(`Panel data from blockchain:`, {
+          externalId: panel.externalId,
+          owner: panel.owner,
+          isActive: panel.isActive,
+          shareTokenAddress: panel.shareTokenAddress,
+          capacity: panel.capacity
+        });
+
+        // Get panel data from database
+        const dbPanel = await prisma.panel.findFirst({
+          where: { blockchainPanelId: panelId.toString() },
+          include: { owner: true }
+        });
+
+        // Get token data if available
+        let tokenData = null;
+        let totalShares = '0';
+        if (panel.shareTokenAddress && panel.shareTokenAddress !== ethers.ZeroAddress) {
+          const tokenContract = ShareToken__factory.connect(panel.shareTokenAddress, provider);
+          const totalSupply = await tokenContract.totalSupply();
+          totalShares = totalSupply.toString();
+
+          tokenData = {
+            tokenId: panelId.toString(),
+            totalSupply: totalShares,
+            availableSupply: '0', // Since availableSupply doesn't exist, we'll use 0
+            isMockData: false
+          };
         }
-      } catch (blockchainError) {
-        console.error('Error fetching blockchain token data:', blockchainError);
+
+        const panelName = dbPanel?.name || `Panel ${panelId}`;
+        console.log(`Panel name: ${panelName}, Total Shares: ${totalShares}`);
+
+        return {
+          id: panel.externalId,
+          name: panelName,
+          panelName: panelName, // Add panelName field for frontend compatibility
+          location: dbPanel?.location || '',
+          capacity: `${Number(panel.capacity)} kW`,
+          minInvestment: '$1,000', // Default value since it doesn't exist in the interface
+          expectedROI: '15%', // Default value since it doesn't exist in the interface
+          progress: 0, // Default value since it doesn't exist in the interface
+          owner: dbPanel?.owner?.name || panel.owner,
+          blockchainData: tokenData,
+          isBlockchainVerified: true,
+          mockDataFields: [],
+          totalShares: totalShares, // Add total shares to the response
+          blockchainPanelId: panelId.toString() // Add blockchainPanelId for dividend distribution
+        };
+      } catch (error) {
+        console.error(`Error processing panel ${panelId}:`, error);
+        return null;
       }
-    } else {
-      console.log('Skipping blockchain token fetch due to missing dependencies');
-    }
+    }));
+
+    // Filter out any null values from failed panel processing
+    const validPanels = panels.filter(panel => panel !== null);
+
+    console.log(`Returning ${validPanels.length} panels to client`);
+    res.json(validPanels);
     
-    // Filter out tokens where the user has no balance if user is authenticated
-    console.log(`Pre-filter: ${enhancedTokens.length} tokens`);
-    
-    if (user?.walletAddress) {
-      enhancedTokens = enhancedTokens.filter(token => {
-        const hasBalance = token.holderBalances && 
-                           user.walletAddress && 
-                           token.holderBalances[user.walletAddress] && 
-                           token.holderBalances[user.walletAddress] > 0;
-        
-        if (!hasBalance) {
-          console.log(`Filtering out token ${token.id} for panel ${token.panelId} due to no balance`);
-        }
-        
-        return hasBalance;
-      });
-      
-      console.log(`Post-filter: ${enhancedTokens.length} tokens`);
-    } else {
-      console.log('No user with wallet address, skipping token filtering');
-    }
-    
-    console.log(`Returning ${enhancedTokens.length} tokens to client`);
-    if (enhancedTokens.length > 0) {
-      console.log('First token in response:', {
-        id: enhancedTokens[0].id,
-        panelId: enhancedTokens[0].panelId,
-        balance: enhancedTokens[0].holderBalances[user?.walletAddress || '']
-      });
-    }
-    
-    console.log('======== END listTokens FUNCTION ========');
-    res.json(enhancedTokens);
   } catch (error) {
-    console.error('Error in listTokens:', error);
-    logger.error('Error in listTokens:', error);
+    console.error('Error in listPanels:', error);
+    logger.error('Error in listPanels:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -688,8 +497,8 @@ export const distributeDividends = async (req: Request, res: Response): Promise<
     const userId = (req as any).user.userId;
 
     // Get panel and check ownership
-    const panel = await prisma.panel.findUnique({
-      where: { id: panelId },
+    const panel = await prisma.panel.findFirst({
+      where: { blockchainPanelId: panelId },
       include: { owner: true },
     });
 
@@ -698,58 +507,59 @@ export const distributeDividends = async (req: Request, res: Response): Promise<
       return;
     }
 
-    // Check if user is the owner of the panel
-    if (panel.owner.id !== userId) {
-      res.status(403).json({ error: 'You do not have permission to distribute dividends for this panel' });
-      return;
-    }
-
     if (!dividendDistributor) {
       res.status(503).json({ message: 'Blockchain features are currently unavailable' });
       return;
     }
 
-    // Convert amount to proper format (USDC has 6 decimals)
-    const usdcDecimals = 6;
+    // Convert amount to proper format (USDC has 18 decimals)
+    const usdcDecimals = 18;
     const distributionAmount = ethers.parseUnits(amount.toString(), usdcDecimals);
+    console.log('Distribution amount in wei:', distributionAmount.toString());
 
-    // Distribute dividends on blockchain
-    const tx = await dividendDistributor.distributeDividends(
+    // Get USDC contract address from dividend distributor
+    const usdcAddress = await dividendDistributor.paymentToken();
+    console.log('USDC contract address:', usdcAddress);
+
+    // Create USDC contract instance
+    const usdcContract = new ethers.Contract(
+      usdcAddress,
+      [
+        'function approve(address spender, uint256 amount) public returns (bool)',
+        'function allowance(address owner, address spender) public view returns (uint256)'
+      ],
+      provider
+    );
+
+    // Prepare the approve transaction data
+    const approveData = usdcContract.interface.encodeFunctionData('approve', [
+      dividendDistributor.target,
+      distributionAmount
+    ]);
+
+    // Prepare the distribute dividends transaction data
+    const distributeData = dividendDistributor.interface.encodeFunctionData('distributeDividends', [
       panel.blockchainPanelId || '',
       distributionAmount
-    );
-    const receipt = await tx.wait();
-
-    if (!receipt) {
-      res.status(500).json({ message: 'Failed to get transaction receipt' });
-      return;
-    }
-
-    // Get dividend distribution event
-    const distributionEvent = receipt.logs.find(log => 
-      log.topics[0] === dividendDistributor.interface.getEvent('DividendDistributed').topicHash
-    );
-
-    if (!distributionEvent) {
-      res.status(500).json({ message: 'Failed to find dividend distribution event' });
-      return;
-    }
-
-    const parsedEvent = dividendDistributor.interface.parseLog({
-      topics: [...distributionEvent.topics],
-      data: distributionEvent.data,
-    });
+    ]);
 
     res.status(200).json({
-      message: 'Dividends distributed successfully',
-      distribution: {
-        panelId,
-        amount: ethers.formatUnits(distributionAmount, usdcDecimals),
-        timestamp: parsedEvent?.args.timestamp.toString(),
-        transactionHash: receipt.hash,
-      },
+      message: 'Transaction data prepared successfully',
+      transactions: {
+        approve: {
+          to: usdcAddress,
+          data: approveData,
+          value: '0x0'
+        },
+        distribute: {
+          to: dividendDistributor.target,
+          data: distributeData,
+          value: '0x0'
+        }
+      }
     });
   } catch (error) {
+    console.error('Error in distributeDividends:', error);
     logger.error('Error in distributeDividends:', error);
     res.status(500).json({ message: 'Internal server error', error: (error as any).message });
   }

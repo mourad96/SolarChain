@@ -4,7 +4,7 @@ import {
   mintTokens,
   transferTokens,
   getTokenDetails,
-  listTokens,
+  listPanels,
   getUserTokens,
   getTokenHolders,
   distributeDividends,
@@ -16,10 +16,10 @@ import { requireAuth } from '../middleware/auth.middleware';
 
 const router = Router();
 
-// Get all tokens for the authenticated user
+// Get all panels for the authenticated user
 router.get('/', requireAuth, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    await listTokens(req, res);
+    await listPanels(req, res);
   } catch (error) {
     next(error);
   }
