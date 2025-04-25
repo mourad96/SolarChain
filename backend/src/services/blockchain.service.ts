@@ -913,7 +913,7 @@ export class BlockchainService {
         panelId,
         holderAddress,
         unclaimedDividends: unclaimedDividends.toString(),
-        formattedAmount: ethers.formatUnits(unclaimedDividends, 6)
+        formattedAmount: ethers.formatUnits(unclaimedDividends, 18)
       });
 
       return unclaimedDividends;

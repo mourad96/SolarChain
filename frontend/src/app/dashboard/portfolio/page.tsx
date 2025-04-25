@@ -465,7 +465,7 @@ export default function PortfolioPage() {
                         return null;
                       })()}
                       <span className="text-sm font-bold text-green-800">
-                        {(Number(panel.unclaimedDividends || '0') / 1e6).toLocaleString('en-US', {
+                        {(Number(panel.unclaimedDividends || '0')).toLocaleString('en-US', {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2
                         })} USDC

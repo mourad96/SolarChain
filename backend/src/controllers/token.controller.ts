@@ -616,8 +616,8 @@ export const getUnclaimedDividends = async (req: Request, res: Response): Promis
       user.walletAddress
     );
 
-    // USDC has 6 decimals
-    const usdcDecimals = 6;
+    // USDC has 18 decimals
+    const usdcDecimals = 18;
 
     res.json({
       panelId,
@@ -750,13 +750,13 @@ export const getUnclaimedDividendsForPanels = async (req: Request, res: Response
             panelId: panel.id,
             blockchainPanelId: panel.blockchainPanelId,
             unclaimed: unclaimed.toString(),
-            formattedAmount: ethers.formatUnits(unclaimed, 6)
+            formattedAmount: ethers.formatUnits(unclaimed, 18)
           });
           
           return {
             panelId: panel.id,
             blockchainPanelId: panel.blockchainPanelId,
-            unclaimedAmount: ethers.formatUnits(unclaimed, 6) // USDC has 6 decimals
+            unclaimedAmount: ethers.formatUnits(unclaimed, 18) // USDC has 18 decimals
           };
         } catch (error) {
           console.error(`Error getting unclaimed dividends for panel ${panel.id}:`, error);
