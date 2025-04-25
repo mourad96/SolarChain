@@ -382,31 +382,31 @@ export class BlockchainService {
       
       // Method 2: For newly created panels using createPanelWithShares, check the database
       // This is a fallback since these panels might not be returned by the getPanelsByOwner function
-      try {
-        // Get directly from database based on the txHash that was saved during creation
-        const prisma = (await import('../config/prisma')).prisma;
-        const dbPanels = await prisma.panel.findMany({
-          where: {
-            blockchainTxHash: { not: null },
-            blockchainPanelId: { not: null },
-            blockchainTokenAddress: { not: null },
-          },
-          select: {
-            id: true,
-            blockchainPanelId: true,
-            blockchainTokenAddress: true
-          }
-        });
+      // try {
+      //   // Get directly from database based on the txHash that was saved during creation
+      //   const prisma = (await import('../config/prisma')).prisma;
+      //   const dbPanels = await prisma.panel.findMany({
+      //     where: {
+      //       blockchainTxHash: { not: null },
+      //       blockchainPanelId: { not: null },
+      //       blockchainTokenAddress: { not: null },
+      //     },
+      //     select: {
+      //       id: true,
+      //       blockchainPanelId: true,
+      //       blockchainTokenAddress: true
+      //     }
+      //   });
         
-        // Add these panel IDs to our list if they have blockchain IDs
-        for (const panel of dbPanels) {
-          if (panel.blockchainPanelId && !panelSerialNumbers.includes(panel.id)) {
-            panelSerialNumbers.push(panel.id);
-          }
-        }
-      } catch (dbError) {
-        logger.warn('Error getting panels from database:', dbError);
-      }
+      //   // Add these panel IDs to our list if they have blockchain IDs
+      //   for (const panel of dbPanels) {
+      //     if (panel.blockchainPanelId && !panelSerialNumbers.includes(panel.id)) {
+      //       panelSerialNumbers.push(panel.id);
+      //     }
+      //   }
+      // } catch (dbError) {
+      //   logger.warn('Error getting panels from database:', dbError);
+      // }
       
       // If no panels found, log the issue
       if (panelSerialNumbers.length === 0) {
@@ -449,57 +449,73 @@ export class BlockchainService {
       
       // Get panel details from registry
       const panel = await (this.registryContract as any).panels(blockchainPanelId);
-      console.log(panel);
+      
       // Check if panel exists and has valid data
       if (!panel || panel.owner === ethers.ZeroAddress) {
         throw new Error(`Panel not found with ID ${blockchainPanelId}`);
       }
+
+      // Get database connection to fetch panel name
+      const prisma = (await import('../config/prisma')).prisma;
+      
+      // Look up panel in database using blockchain panel ID
+      const dbPanel = await prisma.panel.findFirst({
+        where: { blockchainPanelId: blockchainPanelId.toString() },
+        select: {
+          id: true,
+          name: true,
+          location: true,
+          capacity: true
+        }
+      });
+
+      // Common panel data with name from database
+      const commonData = {
+        tokenId: blockchainPanelId.toString(),
+        owner: panel.owner,
+        isActive: panel.isActive,
+        registrationDate: Number(panel.registrationDate),
+        name: dbPanel?.name || `Solar Panel ${blockchainPanelId}`,
+        location: dbPanel?.location || 'Unknown',
+        capacity: dbPanel?.capacity || Number(panel.capacity) / 1000
+      };
       
       // Check if the panel has a token address
       if (panel.shareTokenAddress === ethers.ZeroAddress) {
         // Return panel data without token information
         return {
-          tokenId: blockchainPanelId.toString(),
+          ...commonData,
           totalSupply: "0",
           availableSupply: "0",
-          owner: panel.owner,
-          isActive: panel.isActive,
-          registrationDate: Number(panel.registrationDate),
           price: "0.00"
         };
       }
       
       // If panel has a token, get token details
       try {
-        console.log("step1");
         // Create contract instance for the share token
         const shareTokenContract = ShareToken__factory.connect(panel.shareTokenAddress, this.provider);
         
         // Get token details
         const tokenDetails = await shareTokenContract.getTokenDetails();
-        console.log("tokenDetails", tokenDetails);
+        
         // Get total supply
         const totalSupply = tokenDetails[0].toString();
         
         // Get available supply by checking TokenSale contract's balance
         const tokenSaleContract = TokenSale__factory.connect(panel.saleContractAddress, this.provider);
         const tokenSaleBalance = await shareTokenContract.balanceOf(panel.saleContractAddress);
-        console.log("TokenSale contract balance:", tokenSaleBalance);
         
         // Available supply is the TokenSale contract's balance
         const availableSupply = tokenSaleBalance.toString();
 
         // Get token price from TokenSale contract
         const price = await this.getTokenPrice(panel.saleContractAddress);
-        console.log("Token price from blockchain:", price);
         
         return {
-          tokenId: blockchainPanelId.toString(),
+          ...commonData,
           totalSupply,
           availableSupply,
-          owner: panel.owner,
-          isActive: panel.isActive,
-          registrationDate: Number(panel.registrationDate),
           price: price || "0.00",
           saleContractAddress: panel.saleContractAddress,
           shareTokenAddress: panel.shareTokenAddress
@@ -509,12 +525,9 @@ export class BlockchainService {
         
         // Return panel data with empty token info if token contract call fails
         return {
-          tokenId: blockchainPanelId.toString(),
+          ...commonData,
           totalSupply: "0",
           availableSupply: "0",
-          owner: panel.owner,
-          isActive: panel.isActive,
-          registrationDate: Number(panel.registrationDate),
           price: "0.00"
         };
       }
@@ -533,7 +546,8 @@ export class BlockchainService {
         isActive: true,
         registrationDate: Math.floor(Date.now() / 1000) - (numericValue % 10000000),
         isMockData: true,
-        price: ((10 + (numericValue % 90)) / 10).toFixed(2) + " (mock)"
+        price: ((10 + (numericValue % 90)) / 10).toFixed(2) + " (mock)",
+        name: `Solar Panel ${panelId}` // Use generic name for mock data
       };
     }
   }
@@ -619,7 +633,20 @@ export class BlockchainService {
     tokenName: string, 
     tokenSymbol: string, 
     totalShares: number
-  ): Promise<{ panelId: string; tokenAddress: string; txHash: string }> {
+  ): Promise<{ 
+    transactions: {
+      approve: {
+        to: string;
+        data: string;
+        value: string;
+      };
+      create: {
+        to: string;
+        data: string;
+        value: string;
+      };
+    }
+  }> {
     try {
       this.checkInitialization();
 
@@ -631,30 +658,6 @@ export class BlockchainService {
         throw new Error('Payment token contract not properly initialized');
       }
 
-      // Get private key for signing transactions
-      const privateKey = process.env.PRIVATE_KEY;
-      if (!privateKey) {
-        throw new Error('Missing private key for blockchain transactions');
-      }
-
-      // Create a wallet to sign transactions
-      const wallet = new ethers.Wallet(privateKey, this.provider);
-      
-      // Check if wallet has enough balance for gas
-      const balance = await this.provider.getBalance(wallet.address);
-      logger.info('Wallet balance:', {
-        address: wallet.address,
-        balance: ethers.formatEther(balance),
-        network: this.isLocalNetwork ? 'local' : 'testnet'
-      });
-      
-      if (balance < ethers.parseEther('0.01')) {
-        throw new Error('Wallet has insufficient balance for gas. Please fund the wallet.');
-      }
-      
-      const factoryWithSigner = this.factoryContract.connect(wallet);
-      const paymentTokenWithSigner = this.paymentTokenContract.connect(wallet);
-
       // Get USDC address from environment
       const paymentToken = process.env.MOCK_ERC20_ADDRESS;
       if (!paymentToken) {
@@ -662,7 +665,7 @@ export class BlockchainService {
       }
 
       // Set default token price (in USDC, 18 decimals)
-      const tokenPrice =  ethers.parseUnits("1", "ether"); // 1 USDC per token to reduce cost
+      const tokenPrice = ethers.parseUnits("1", "ether"); // 1 USDC per token to reduce cost
 
       // Set sale end time to 30 days from now
       const saleEndTime = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60);
@@ -670,7 +673,7 @@ export class BlockchainService {
       // Convert capacity to Wei (18 decimals)
       const capacityInWei = ethers.parseUnits(panel.capacity.toString(), USDC_DECIMALS);
 
-      logger.info('Creating panel with shares on blockchain:', {
+      logger.info('Preparing panel creation transaction data:', {
         externalId: panel.id,
         tokenName,
         tokenSymbol,
@@ -682,369 +685,42 @@ export class BlockchainService {
         network: this.isLocalNetwork ? 'local' : 'testnet'
       });
 
-      // Check contract configurations
-      logger.info('Contract addresses verification:', {
-        factoryAddress: this.factoryContract.target,
-        registryAddress: this.registryContract?.target,
-        mockTokenAddress: paymentToken
-      });
+      // Prepare approval transaction data
+      const approvalAmount = ethers.MaxUint256; // Infinite approval
+      const approvalData = this.paymentTokenContract.interface.encodeFunctionData('approve', [
+        this.factoryContract.target,
+        approvalAmount
+      ]);
 
-      // Enhanced error handling with transaction simulation
-      let tx;
-      try {
-        // Approve factory contract to spend payment tokens
-        const approvalAmount = ethers.MaxUint256; // Infinite approval
-        logger.info('Approving factory contract to spend payment tokens:', {
-          factoryAddress: this.factoryContract.target,
-          amount: approvalAmount.toString()
-        });
-
-        const approvalTx = await paymentTokenWithSigner.approve(
-          this.factoryContract.target,
-          approvalAmount
-        );
-        await approvalTx.wait();
-        logger.info('Payment token approval successful');
-
-        // Create panel with shares on blockchain
-        tx = await factoryWithSigner.createPanelWithShares(
-          panel.id, // externalId
-          tokenName,
-          tokenSymbol,
-          capacityInWei, // capacity in Wei
-          totalShares,
-          tokenPrice,
-          saleEndTime,
-          paymentToken
-        );
-      } catch (txError: any) {
-        logger.error('Transaction simulation or execution failed:', {
-          error: txError.message,
-          reason: txError.reason || 'Unknown',
-          code: txError.code || 'Unknown',
-          data: txError.data || 'None',
-          network: this.isLocalNetwork ? 'local' : 'testnet'
-        });
-        
-        // Try to get a more detailed error if possible
-        if (txError.code === 'CALL_EXCEPTION') {
-          try {
-            // Try direct call to see if we can get more details
-            const callResult = await this.provider.call({
-              to: this.factoryContract.target,
-              data: this.factoryContract.interface.encodeFunctionData('createPanelWithShares', [
-                panel.id,
-                tokenName,
-                tokenSymbol,
-                capacityInWei,
+      // Prepare create panel transaction data
+      const createData = this.factoryContract.interface.encodeFunctionData('createPanelWithShares', [
+        panel.id, // externalId
+        tokenName,
+        tokenSymbol,
+        capacityInWei, // capacity in Wei
         totalShares,
         tokenPrice,
         saleEndTime,
         paymentToken
-              ])
-            });
-            
-            logger.error('Call execution details:', {
-              result: callResult,
-              network: this.isLocalNetwork ? 'local' : 'testnet'
-            });
-          } catch (callError: any) {
-            logger.error('Detailed call error:', {
-              error: callError.message,
-              reason: callError.reason || 'Unknown',
-              data: callError.data || 'None'
-            });
-          }
-        }
-        
-        throw new Error(`Transaction failed: ${txError.message}`);
-      }
+      ]);
 
-      logger.info('Transaction submitted:', { 
-        txHash: tx.hash,
-        network: this.isLocalNetwork ? 'local' : 'testnet'
-      });
-
-      // Wait for transaction with appropriate confirmation count
-      const confirmations = this.isLocalNetwork ? 1 : 2;
-      let receipt;
-      
-      try {
-        receipt = await tx.wait(confirmations);
-        logger.info('Transaction confirmed:', {
-          txHash: receipt.hash,
-          blockNumber: receipt.blockNumber,
-          gasUsed: receipt.gasUsed?.toString() || 'Unknown',
-          network: this.isLocalNetwork ? 'local' : 'testnet'
-        });
-      } catch (waitError: any) {
-        logger.error('Transaction confirmation failed:', {
-          error: waitError.message,
-          txHash: tx.hash,
-          network: this.isLocalNetwork ? 'local' : 'testnet'
-        });
-        
-        // Transaction failed, but we have the tx hash
-        // Try to get transaction receipt directly
-        try {
-          receipt = await this.provider.getTransactionReceipt(tx.hash);
-          if (!receipt) {
-            throw new Error('Transaction receipt not available');
-          }
-          
-          logger.info('Retrieved transaction receipt manually:', {
-            txHash: receipt.hash,
-            blockNumber: receipt.blockNumber,
-            status: receipt.status,
-            network: this.isLocalNetwork ? 'local' : 'testnet'
-          });
-          
-          // If transaction status is 0, it failed
-          if (receipt.status === 0) {
-            throw new Error('Transaction failed on blockchain');
-          }
-        } catch (receiptError) {
-          logger.error('Failed to retrieve transaction receipt:', receiptError);
-          throw new Error(`Transaction may have failed: ${waitError.message}`);
-        }
-      }
-
-      // Log the full receipt for debugging
-      logger.info('Transaction receipt details:', {
-        txHash: receipt.hash,
-        gasUsed: receipt.gasUsed?.toString(),
-        status: receipt.status,
-        logs: receipt.logs.length,
-        logAddresses: receipt.logs.map(log => log.address),
-        network: this.isLocalNetwork ? 'local' : 'testnet'
-      });
-
-      // Special handling for Hardhat - check transaction trace
-      if (this.isLocalNetwork && receipt.logs.length === 0 && receipt.status === 1) {
-        logger.info('Transaction succeeded on Hardhat but no logs found, checking transaction trace');
-        
-        try {
-          // Use hardhat-specific debug_traceTransaction RPC call if available
-          const trace = await this.provider.send('debug_traceTransaction', [receipt.hash]);
-          logger.info('Transaction trace available:', { 
-            hasTrace: !!trace,
-            txHash: receipt.hash 
-          });
-        } catch (traceError) {
-          logger.warn('Hardhat trace unavailable:', traceError);
-        }
-        
-        // For Hardhat, if transaction succeeded but no events, return mock data
-        // This allows development to continue
-        const mockTokenAddress = '0x8f5BB8f4069e1834C26a79eFDba9565DDCB11B44';
-        
-        logger.info('Returning successful result for Hardhat node');
-        return {
-          panelId: '1', // Default panel ID for Hardhat
-          tokenAddress: mockTokenAddress,
-          txHash: receipt.hash
-        };
-      }
-
-      // Direct approach - use the transaction receipt itself
-      // If transaction succeeded but no events were found, use directly query the registry
-      if (receipt.status === 1) {
-        try {
-          // Wait a moment for blockchain indexing
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-          logger.info('Transaction successful, checking registry for updates', {
-            txHash: receipt.hash
-          });
-          
-          // Check for panel directly using external ID
-          try {
-            // Get panel ID from external ID
-            const panelId = await (this.registryContract as any).getPanelIdByExternalId(panel.id);
-            
-            if (panelId && panelId.toString() !== '0') {
-              // Get panel details
-              const panelData = await (this.registryContract as any).panels(panelId);
-              
-              logger.info('Found panel by external ID:', {
-                panelId: panelId.toString(),
-                externalId: panelData.externalId,
-                owner: panelData.owner,
-                tokenAddress: panelData.shareTokenAddress
-              });
-              
-              if (panelData.shareTokenAddress && panelData.shareTokenAddress !== ethers.ZeroAddress) {
-                logger.info('Successfully found panel and token through direct lookup', {
-                  panelId: panelId.toString(),
-                  tokenAddress: panelData.shareTokenAddress
-                });
-                
-                return {
-                  panelId: panelId.toString(),
-                  tokenAddress: panelData.shareTokenAddress,
-                  txHash: receipt.hash
-                };
-              }
-            }
-          } catch (lookupError) {
-            logger.warn('Error looking up panel by external ID:', lookupError);
-          }
-          
-          // If we have no events but transaction succeeded, return basic information
-          // with a mock token address that can be updated later
-          if (receipt.logs.length === 0) {
-            logger.warn('Transaction succeeded but no events found, returning basic information', {
-              txHash: receipt.hash
-            });
-            
-            const mockTokenAddress = '0x8f5BB8f4069e1834C26a79eFDba9565DDCB11B44'; // Use a placeholder token address
-            
-            return {
-              panelId: '1', // Default panel ID
-              tokenAddress: mockTokenAddress,
-              txHash: receipt.hash
-            };
-          }
-        } catch (registryError) {
-          logger.error('Error querying registry after transaction:', registryError);
-        }
-      }
-
-      // Enhanced event detection
-      // Try multiple approaches to find the event
-      let event;
-      let parsedEvent;
-
-      // Approach 1: Try standard event parsing
-      for (const log of receipt.logs) {
-          try {
-            const parsed = this.factoryContract!.interface.parseLog({
-              topics: [...log.topics],
-              data: log.data,
-            });
-          
-          if (parsed?.name === 'PanelAndSharesCreated') {
-            event = log;
-            parsedEvent = parsed;
-            logger.info('Found event using standard parsing', { 
-              eventName: parsed.name,
-              logAddress: log.address
-            });
-            break;
-          }
-        } catch (error) {
-          // Continue to next log if parsing fails
-          continue;
-        }
-      }
-
-      // Approach 2: If standard parsing fails, try direct fragment access
-      if (!event && this.isLocalNetwork) {
-        for (const log of receipt.logs) {
-          try {
-            if ((log as any).fragment?.name === 'PanelAndSharesCreated') {
-              event = log;
-              parsedEvent = {
-                args: {
-                  panelId: (log as any).args[0],
-                  shareToken: (log as any).args[1]
-                }
-              };
-              logger.info('Found event using fragment access', { 
-                logAddress: log.address
-              });
-              break;
-            }
-          } catch (error) {
-            // Continue to next log
-            continue;
-          }
-        }
-      }
-
-      // Approach 3: Try finding by event signature
-      if (!event) {
-        // Get event signature for PanelAndSharesCreated
-        const eventSignature = 'PanelAndSharesCreated(uint256,address,address,string,uint256,uint256)';
-        const eventHash = ethers.keccak256(ethers.toUtf8Bytes(eventSignature));
-        
-        logger.info('Looking for event by signature', { 
-          eventSignature, 
-          eventHash,
-          factoryAddress: this.factoryContract.target
-        });
-        
-        for (const log of receipt.logs) {
-          if (log.topics && log.topics[0] === eventHash) {
-            try {
-              logger.info('Found potential event by topic match', {
-                logAddress: log.address,
-                factoryAddress: this.factoryContract.target
-              });
-              
-              const decoded = this.factoryContract!.interface.decodeEventLog(
-                'PanelAndSharesCreated',
-                log.data,
-                log.topics
-              );
-              
-              event = log;
-        parsedEvent = {
-          args: {
-                  panelId: decoded[0],
-                  shareToken: decoded[1]
-                }
-              };
-              logger.info('Successfully decoded event by signature', { 
-                logAddress: log.address
-              });
-              break;
-            } catch (error) {
-              logger.warn('Failed to decode event by signature', {
-                error: (error as Error).message,
-                logAddress: log.address
-              });
-              // Continue to next log
-              continue;
-            }
-          }
-        }
-      }
-
-      if (!event || !parsedEvent || !parsedEvent.args) {
-        logger.error('Failed to find PanelAndSharesCreated event:', {
-          receipt: JSON.stringify({
-            transactionHash: receipt.hash,
-            blockNumber: receipt.blockNumber,
-            status: receipt.status,
-            logs: receipt.logs.map(log => ({
-              address: log.address,
-              topics: log.topics
-            }))
-          }),
-          factoryAddress: this.factoryContract.target.toString(),
-          network: this.isLocalNetwork ? 'local' : 'testnet'
-        });
-        
-        throw new Error('Failed to find PanelAndSharesCreated event in transaction receipt');
-      }
-
-      logger.info('Panel and shares created:', {
-        panelId: parsedEvent.args.panelId.toString(),
-        tokenAddress: parsedEvent.args.shareToken,
-        txHash: receipt.hash,
-        network: this.isLocalNetwork ? 'local' : 'testnet'
-      });
-
-      // Return transaction details
       return {
-        panelId: parsedEvent.args.panelId.toString(),
-        tokenAddress: parsedEvent.args.shareToken,
-        txHash: receipt.hash
+        transactions: {
+          approve: {
+            to: this.paymentTokenContract.target.toString(),
+            data: approvalData,
+            value: '0x0'
+          },
+          create: {
+            to: this.factoryContract.target.toString(),
+            data: createData,
+            value: '0x0'
+          }
+        }
       };
     } catch (error) {
-      logger.error('Error creating panel with shares on blockchain:', error);
-      throw new Error(`Failed to create panel with shares on blockchain: ${error.message}`);
+      logger.error('Error preparing panel creation transaction:', error);
+      throw new Error(`Failed to prepare panel creation transaction: ${error.message}`);
     }
   }
 
@@ -1249,6 +925,100 @@ export class BlockchainService {
         network: this.isLocalNetwork ? 'local' : 'testnet'
       });
       throw new Error(`Failed to get unclaimed dividends: ${error.message}`);
+    }
+  }
+
+  /**
+   * Gets the next panel ID that will be assigned
+   * @returns The next panel ID as a string
+   */
+  async getNextPanelId(): Promise<string> {
+    try {
+      this.checkInitialization();
+
+      if (!this.registryContract) {
+        throw new Error('Registry contract not properly initialized');
+      }
+
+      logger.info('Getting next panel ID from registry contract');
+
+      // Call the getNextPanelId function from the contract using type assertion
+      const nextPanelId = await (this.registryContract as any).getNextPanelId();
+
+      logger.info('Retrieved next panel ID:', {
+        nextPanelId: nextPanelId.toString()
+      });
+
+      return nextPanelId.toString();
+    } catch (error) {
+      logger.error('Error getting next panel ID:', error);
+      throw new Error(`Failed to get next panel ID: ${error.message}`);
+    }
+  }
+
+  /**
+   * Gets all panels from the blockchain with database information when available
+   * @returns Array of panel information including names from database when available
+   */
+  async getAllPanels(): Promise<Array<{
+    serialNumber: string;
+    name: string;
+    location: string;
+    capacity: number;
+  }>> {
+    try {
+      this.checkInitialization();
+      
+      let panels: Array<{
+        serialNumber: string;
+        name: string;
+        location: string;
+        capacity: number;
+      }> = [];
+      
+      // Get the next panel ID to know how many panels exist
+      const nextPanelId = await this.getNextPanelId();
+      const totalPanels = Number(nextPanelId) - 1;
+      
+      // Get database connection
+      const prisma = (await import('../config/prisma')).prisma;
+      
+      // Iterate through all panel IDs
+      for (let i = 1; i <= totalPanels; i++) {
+        try {
+          const panel = await (this.registryContract as any).panels(i);
+          
+          // Look up panel in database using blockchain panel ID
+          const dbPanel = await prisma.panel.findFirst({
+            where: { blockchainPanelId: i.toString() },
+            select: {
+              id: true,
+              name: true,
+              location: true,
+              capacity: true
+            }
+          });
+
+          if (dbPanel) {
+            // If we have a database entry, use its exact values
+            panels.push({
+              serialNumber: dbPanel.id,
+              name: dbPanel.name,
+              location: dbPanel.location || 'Unknown',
+              capacity: dbPanel.capacity
+            });
+          }
+        } catch (panelError) {
+          logger.warn(`Failed to fetch panel ${i} details:`, panelError);
+        }
+      }
+      
+      logger.info(`Found ${panels.length} total panels`);
+      
+      return panels;
+    } catch (error) {
+      logger.error('Error getting all panels from blockchain:', error);
+      throw new Error(`Failed to get all panels from blockchain: ${error.message}`);
     }
   }
 }

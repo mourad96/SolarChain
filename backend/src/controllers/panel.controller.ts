@@ -39,36 +39,30 @@ export async function registerPanel(req: Request, res: Response) {
         location,
         capacity: Number(capacity),
         ownerId: user.id,
-        status: 'active' as const,
+        status: 'pending' as const,
         createdAt: new Date(),
         updatedAt: new Date()
       };
 
-      // Try blockchain registration first
-      const blockchainResult = await blockchainService.createPanelWithShares(
+      // Get transaction data for blockchain registration
+      const transactionData = await blockchainService.createPanelWithShares(
         tempPanel,
         tokenName || `${name} Token`,
         tokenSymbol || name.slice(0, 3).toUpperCase(),
         totalShares || 100
       );
 
-      logger.info('Panel created on blockchain:', { 
-        blockchainPanelId: blockchainResult.panelId,
-        tokenAddress: blockchainResult.tokenAddress,
-        txHash: blockchainResult.txHash
-      });
-
-      // Only after successful blockchain registration, create in database
+      // Create panel in database with pending status
       const panel = await prismaClient.panel.create({
         data: {
           name,
           location,
           capacity: Number(capacity),
           ownerId: user.id,
-          status: 'active',
-          blockchainTxHash: blockchainResult.txHash,
-          blockchainTokenAddress: blockchainResult.tokenAddress,
-          blockchainPanelId: blockchainResult.panelId
+          status: 'pending',
+          blockchainTxHash: null, // Will be updated after user signs transaction
+          blockchainTokenAddress: null, // Will be updated after transaction confirmation
+          blockchainPanelId: null // Will be updated after transaction confirmation
         },
         include: {
           owner: true
@@ -77,16 +71,14 @@ export async function registerPanel(req: Request, res: Response) {
 
       res.status(201).json({ 
         panel,
-        blockchainTxHash: blockchainResult.txHash,
-        tokenAddress: blockchainResult.tokenAddress,
-        blockchainPanelId: blockchainResult.panelId,
-        message: 'Panel registered successfully on blockchain and database' 
+        transactions: transactionData.transactions,
+        message: 'Please sign the transactions in your wallet to complete panel registration'
       });
       
     } catch (blockchainError) {
-      logger.error('Failed to register panel on blockchain:', blockchainError);
+      logger.error('Failed to prepare panel registration transaction:', blockchainError);
       
-      let errorMessage = 'Blockchain registration failed';
+      let errorMessage = 'Failed to prepare blockchain transaction';
       let errorCode = 'BLOCKCHAIN_ERROR';
       
       if (blockchainError.message.includes('not properly initialized')) {
@@ -210,9 +202,9 @@ export async function getPanelDetails(req: Request, res: Response) {
     if (blockchainPanel) {
       const formattedPanel = {
         id: panelId,
-        name: `Solar Panel ${panelId}`,
-        location: 'Blockchain',
-        capacity: '0',
+        name: blockchainPanel.name || `Solar Panel ${panelId}`,
+        location: blockchainPanel.location || 'Blockchain',
+        capacity: blockchainPanel.capacity || '0',
         price: blockchainPanel.price || '0.00',
         expectedROI: '0',
         progress: 0,
@@ -319,6 +311,56 @@ export async function setPanelStatus(req: Request, res: Response) {
   }
 }
 
+export async function updatePanelBlockchainStatus(req: Request, res: Response) {
+  try {
+    const { panelId } = req.params;
+    const { txHash, tokenAddress } = req.body;
+    const userId = (req as any).user.id;
+
+    // Get panel
+    const panel = await prismaClient.panel.findUnique({
+      where: { id: panelId },
+      include: {
+        owner: true
+      }
+    });
+
+    if (!panel) {
+      res.status(404).json({ message: 'Panel not found' });
+      return;
+    }
+
+    // Check if user is the owner
+    if (panel.ownerId !== userId) {
+      res.status(403).json({ message: 'You do not have permission to update this panel' });
+      return;
+    }
+
+    // Get the next panel ID from blockchain and subtract 1 to get current panel ID
+    const nextPanelId = await blockchainService.getNextPanelId();
+    const currentPanelId = (BigInt(nextPanelId) - BigInt(1)).toString();
+
+    // Update panel with blockchain information
+    const updatedPanel = await prismaClient.panel.update({
+      where: { id: panelId },
+      data: {
+        status: 'active',
+        blockchainTxHash: txHash,
+        blockchainTokenAddress: tokenAddress,
+        blockchainPanelId: currentPanelId
+      }
+    });
+
+    res.json({
+      message: 'Panel blockchain status updated successfully',
+      panel: updatedPanel
+    });
+  } catch (error) {
+    logger.error('Error in updatePanelBlockchainStatus:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
 // Export the PanelController class
 export class PanelController {
   private blockchainService: BlockchainService;
@@ -357,15 +399,19 @@ export class PanelController {
 
       console.log("userPanels", userPanels);
       try {
-        const panelSerialNumbers = await this.blockchainService.getOwnerPanels(user.walletAddress);
-        console.log("panelSerialNumbers", panelSerialNumbers);
-        const panelDetails = await Promise.all(panelSerialNumbers.map(async (serialNumber) => {
+        // Get all panels from blockchain with database information
+        const panels = await this.blockchainService.getAllPanels();
+        console.log("panels from blockchain:", panels);
+        const panelDetails = await Promise.all(panels.map(async (panel) => {
           try {
-            console.log("serialNumber", serialNumber);
-            const panelData = await this.blockchainService.getPanelFromBlockchain(serialNumber);
+            console.log("processing panel:", panel);
+            const panelData = await this.blockchainService.getPanelFromBlockchain(panel.serialNumber);
             const blockchainData = await this.blockchainService.getPanelById(panelData.id);
             return {
               ...panelData,
+              name: panel.name, // Use the name from database
+              location: panel.location, // Use the location from database
+              capacity: panel.capacity, // Use the capacity from database
               blockchainData: {
                 tokenId: blockchainData.tokenId,
                 totalSupply: blockchainData.totalSupply,
@@ -381,7 +427,7 @@ export class PanelController {
               ? `Panel exists in database but not on blockchain yet (${error.message})`
               : error.message || 'Unknown error';
             logger.warn('Error fetching panel details:', {
-              serialNumber,
+              serialNumber: panel.serialNumber,
               errorMessage,
               fallback: 'Will use database panel information instead'
             });

@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/useAuth';
 import toast from 'react-hot-toast';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import DashboardHeader from '@/components/dashboard/DashboardHeader';
+import { ethers } from 'ethers';
 
 interface SolarPanel {
   id: string;
@@ -222,7 +223,7 @@ export default function PanelsPage() {
     }
   };
 
-  const handleAddPanel = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const token = localStorage.getItem('token');
@@ -236,6 +237,11 @@ export default function PanelsPage() {
 
       if (!walletAddress) {
         toast.error('Please connect your wallet first to register on blockchain');
+        return;
+      }
+
+      if (!window.ethereum) {
+        toast.error('Please install MetaMask to register panel');
         return;
       }
 
@@ -256,22 +262,121 @@ export default function PanelsPage() {
       }
 
       const responseData = await response.json();
-      toast.success('Solar panel added successfully with shares created on blockchain');
-      setIsAddingPanel(false);
-      setNewPanel({ 
-        name: '', 
-        location: '', 
-        capacity: 0, 
-        tokenName: '', 
-        tokenSymbol: '', 
-        totalShares: 100 
-      });
-      await fetchPanels();
+      console.log('Panel registration response:', responseData);
+
+      // Get the transaction data from the response
+      const { transactions, panel } = responseData;
+
+      // Create provider instance
+      const provider = new ethers.BrowserProvider(window.ethereum);
+
+      // First, send the approval transaction
+      console.log('Preparing approval transaction...');
+      toast.loading('Preparing approval transaction...', { id: 'approval' });
+
+      try {
+        const approvalTx = await window.ethereum.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from: walletAddress,
+            to: transactions.approve.to,
+            data: transactions.approve.data,
+            value: transactions.approve.value
+          }],
+        });
+
+        console.log('Approval transaction sent:', approvalTx);
+        toast.loading('Waiting for approval transaction confirmation...', { id: 'approval' });
+
+        // Wait for the approval transaction with timeout
+        const approvalReceipt = await Promise.race([
+          provider.waitForTransaction(approvalTx),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Approval transaction timeout')), 60000))
+        ]);
+
+        console.log('Approval transaction confirmed:', approvalReceipt);
+        toast.success('Approval transaction confirmed!', { id: 'approval' });
+
+        // Add a small delay before sending the create transaction
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Then, send the create transaction
+        console.log('Preparing create transaction...');
+        toast.loading('Preparing panel creation transaction...', { id: 'creation' });
+
+        const createTx = await window.ethereum.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from: walletAddress,
+            to: transactions.create.to,
+            data: transactions.create.data,
+            value: transactions.create.value
+          }],
+        });
+
+        console.log('Create transaction sent:', createTx);
+        toast.loading('Waiting for panel creation transaction confirmation...', { id: 'creation' });
+
+        // Wait for the create transaction with timeout
+        const createReceipt = await Promise.race([
+          provider.waitForTransaction(createTx),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Creation transaction timeout')), 120000))
+        ]);
+
+        console.log('Create transaction confirmed:', createReceipt);
+        toast.success('Panel creation transaction confirmed!', { id: 'creation' });
+
+        // Update the panel's blockchain status
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/panels/${panel.id}/blockchain-status`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            txHash: createTx,
+            tokenAddress: null,
+            blockchainPanelId: null,
+          }),
+        });
+
+        toast.success('Solar panel registered successfully!');
+        setIsAddingPanel(false);
+        setNewPanel({ 
+          name: '', 
+          location: '', 
+          capacity: 0, 
+          tokenName: '', 
+          tokenSymbol: '', 
+          totalShares: 100 
+        });
+        await fetchPanels();
+      } catch (txError: any) {
+        console.error('Transaction error:', txError);
+        
+        // Handle user rejection
+        if (txError.code === 4001) {
+          toast.error('Transaction was rejected by user');
+        } 
+        // Handle transaction timeout
+        else if (txError.message.includes('timeout')) {
+          toast.error('Transaction timed out. Please try again');
+        }
+        // Handle other transaction errors
+        else {
+          toast.error(`Transaction failed: ${txError.message}`);
+        }
+        
+        throw txError;
+      }
     } catch (error) {
       console.error('Error adding panel:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to add solar panel');
     } finally {
       setIsLoading(false);
+      // Clear any remaining toasts
+      toast.dismiss('approval');
+      toast.dismiss('creation');
     }
   };
 
@@ -543,7 +648,7 @@ export default function PanelsPage() {
                 <XMarkIcon className="h-6 w-6" />
               </button>
             </div>
-            <form onSubmit={handleAddPanel}>
+            <form onSubmit={handleSubmit}>
               <div className="space-y-4">
                 <div>
                   <label htmlFor="name" className="block text-sm font-medium text-gray-700">

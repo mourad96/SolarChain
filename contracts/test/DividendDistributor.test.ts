@@ -274,6 +274,78 @@ describe("DividendDistributor", function () {
     });
   });
 
+  describe("getUnclaimedDividends", function () {
+    it("Should return correct unclaimed dividends for users with shares", async function () {
+      // Distribute dividends
+      await dividendDistributor.distributeDividends(panelId, dividendAmount);
+      
+      // Calculate expected dividends
+      const user1ExpectedDividends = dividendAmount * user1Shares / totalShares;
+      const user2ExpectedDividends = dividendAmount * user2Shares / totalShares;
+      
+      // Check unclaimed dividends
+      expect(await dividendDistributor.getUnclaimedDividends(panelId, user1.address)).to.equal(user1ExpectedDividends);
+      expect(await dividendDistributor.getUnclaimedDividends(panelId, user2.address)).to.equal(user2ExpectedDividends);
+    });
+
+    it("Should return 0 for users with no shares", async function () {
+      // Distribute dividends
+      await dividendDistributor.distributeDividends(panelId, dividendAmount);
+      
+      // Get a user with no shares
+      const noSharesUser = await ethers.getSigners().then(signers => signers[5]);
+      
+      // Check unclaimed dividends
+      expect(await dividendDistributor.getUnclaimedDividends(panelId, noSharesUser.address)).to.equal(0);
+    });
+
+    it("Should return 0 for non-existent panel", async function () {
+      const nonExistentPanelId = 9999n;
+      expect(await dividendDistributor.getUnclaimedDividends(nonExistentPanelId, user1.address)).to.equal(0);
+    });
+
+    it("Should update unclaimed amount after partial claim", async function () {
+      // Distribute dividends twice
+      await dividendDistributor.distributeDividends(panelId, dividendAmount);
+      await dividendDistributor.distributeDividends(panelId, dividendAmount);
+      
+      // Calculate total expected dividends
+      const totalExpectedDividends = (dividendAmount * 2n * user1Shares) / totalShares;
+      
+      // Verify initial unclaimed amount
+      expect(await dividendDistributor.getUnclaimedDividends(panelId, user1.address)).to.equal(totalExpectedDividends);
+      
+      // Claim dividends
+      await dividendDistributor.connect(user1).claimDividends(panelId);
+      
+      // Verify unclaimed amount is now 0
+      expect(await dividendDistributor.getUnclaimedDividends(panelId, user1.address)).to.equal(0);
+    });
+
+    it("Should handle multiple users claiming at different times", async function () {
+      // Distribute dividends
+      await dividendDistributor.distributeDividends(panelId, dividendAmount);
+      
+      // Calculate expected dividends
+      const user1ExpectedDividends = dividendAmount * user1Shares / totalShares;
+      const user2ExpectedDividends = dividendAmount * user2Shares / totalShares;
+      
+      // User1 claims their dividends
+      await dividendDistributor.connect(user1).claimDividends(panelId);
+      
+      // Check that user1's unclaimed is 0 but user2's is unchanged
+      expect(await dividendDistributor.getUnclaimedDividends(panelId, user1.address)).to.equal(0);
+      expect(await dividendDistributor.getUnclaimedDividends(panelId, user2.address)).to.equal(user2ExpectedDividends);
+      
+      // Distribute more dividends
+      await dividendDistributor.distributeDividends(panelId, dividendAmount);
+      
+      // Check that user1 has new unclaimed dividends while user2 has accumulated unclaimed dividends
+      expect(await dividendDistributor.getUnclaimedDividends(panelId, user1.address)).to.equal(user1ExpectedDividends);
+      expect(await dividendDistributor.getUnclaimedDividends(panelId, user2.address)).to.equal(user2ExpectedDividends * 2n);
+    });
+  });
+
   describe("Pausing", function () {
     it("Should pause and unpause", async function () {
       // Pause the contract

@@ -455,8 +455,17 @@ export default function PortfolioPage() {
                   <div className="mt-4 bg-green-50 p-4 rounded-md">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium text-green-800">Unclaimed Dividends</span>
+                      {(() => {
+                        console.log('Raw unclaimed dividends value:', {
+                          panelId: panel.id,
+                          blockchainPanelId: panel.blockchainPanelId,
+                          unclaimedDividends: panel.unclaimedDividends,
+                          unclaimedDividendsNumber: Number(panel.unclaimedDividends || '0')
+                        });
+                        return null;
+                      })()}
                       <span className="text-sm font-bold text-green-800">
-                        {(Number(panel.unclaimedDividends || '0') / 1e18).toLocaleString('en-US', {
+                        {(Number(panel.unclaimedDividends || '0') / 1e6).toLocaleString('en-US', {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2
                         })} USDC

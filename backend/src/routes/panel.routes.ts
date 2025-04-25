@@ -8,7 +8,8 @@ import {
   getPanelDetails,
   listPanels,
   getUserPanels,
-  setPanelStatus
+  setPanelStatus,
+  updatePanelBlockchainStatus
 } from '../controllers/panel.controller';
 import { PanelController } from '../controllers/panel.controller';
 
@@ -97,6 +98,13 @@ router.get(
   '/blockchain/all',
   requireAuth as any,
   panelController.getBlockchainPanels.bind(panelController)
+);
+
+// Update panel blockchain status
+router.post(
+  '/:panelId/blockchain-status',
+  requireAuth as any,
+  updatePanelBlockchainStatus
 );
 
 export { router as panelRouter }; 

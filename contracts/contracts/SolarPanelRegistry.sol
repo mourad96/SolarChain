@@ -314,6 +314,15 @@ contract SolarPanelRegistry is
     }
 
     /**
+     * @dev Gets the next panel ID
+     * @return The next panel ID
+     */
+    function getNextPanelId() external view returns (uint256) {
+        return _nextPanelId;
+    }
+
+
+    /**
      * @dev Emergency function to force update a panel's status
      * @param panelId The ID of the panel
      * @param isActive The new active status
@@ -349,4 +358,5 @@ contract SolarPanelRegistry is
         _pause();
         emit EmergencyAction("Emergency pause", msg.sender);
     }
+
 } 

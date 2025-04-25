@@ -531,7 +531,7 @@ export const distributeDividends = async (req: Request, res: Response): Promise<
     }
 
     // Convert amount to proper format (USDC has 6 decimals)
-    const usdcDecimals = 6;
+    const usdcDecimals = 18;
     const distributionAmount = ethers.parseUnits(amount.toString(), usdcDecimals);
     console.log('Distribution amount in wei:', distributionAmount.toString());
 
