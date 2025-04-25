@@ -13,7 +13,7 @@ export default function MainLayout({ children, title = 'IOFY - Solar Energy Inve
         <title>{title}</title>
         <meta name="description" content="IOFY - Connecting solar panel owners with investors" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="/favicon.ico" />
+        <link rel="icon" href="/iofy_logo.png" />
       </Head>
       <div className="min-h-screen bg-gray-50">
         <main>{children}</main>

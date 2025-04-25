@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { toast } from 'react-hot-toast';
 import { useAuthContext } from '@/context/AuthContext';
+import Image from 'next/image';
 
 // Define a more specific interface for Ethereum provider
 declare global {
@@ -179,7 +180,15 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
       {/* Sidebar */}
       <div className="fixed inset-y-0 left-0 w-64 bg-white shadow-lg">
         <div className="flex h-16 items-center justify-center border-b">
-          <Link href="/" className="text-xl font-bold text-blue-600">
+          <Link href="/" className="flex items-center text-xl font-bold text-blue-600">
+            <Image 
+              src="/iofy_logo.png" 
+              alt="IOFY Logo" 
+              width={40} 
+              height={40}
+              className="mr-2" 
+              priority
+            />
             IOFY
           </Link>
         </div>

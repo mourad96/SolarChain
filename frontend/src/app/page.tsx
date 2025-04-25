@@ -1,14 +1,27 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import MainLayout from '@/components/layout/MainLayout';
+import Header from '@/components/layout/Header';
 
 export default function Home() {
   return (
     <MainLayout>
+      <Header />
       <div className="flex min-h-screen flex-col items-center justify-center p-4">
         <div className="w-full max-w-4xl text-center">
-          <h1 className="mb-8 text-5xl font-bold text-gray-900">
-            Welcome to IOFY
-          </h1>
+          <div className="mb-8 flex flex-col items-center">
+            <Image
+              src="/iofy_logo.png"
+              alt="IOFY Logo"
+              width={120}
+              height={120}
+              priority
+              className="mb-4"
+            />
+            <h1 className="text-5xl font-bold text-gray-900">
+              Welcome to IOFY
+            </h1>
+          </div>
           <p className="mb-12 text-xl text-gray-600">
             Connect solar energy producers with investors for a sustainable future
           </p>

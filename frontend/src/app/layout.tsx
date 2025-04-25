@@ -9,6 +9,9 @@ const inter = Inter({ subsets: ['latin'] });
 export const metadata: Metadata = {
   title: 'IOFY - Solar Energy Management',
   description: 'Manage your solar panels and energy tokens with IOFY',
+  icons: {
+    icon: '/iofy_logo.png',
+  },
 };
 
 export default function RootLayout({
@@ -18,6 +21,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <link rel="icon" href="/iofy_logo.png" />
+      </head>
       <body className={inter.className}>
         <Providers>
           {children}
