@@ -343,6 +343,12 @@ export const listPanels = async (req: Request, res: Response): Promise<void> => 
           capacity: panel.capacity
         });
 
+        // Skip test panels with externalId = 'TEST-PANEL-001'
+        if (panel.externalId === 'TEST-PANEL-001') {
+          console.log(`Skipping test panel with externalId: ${panel.externalId}`);
+          return null;
+        }
+
         // Get panel data from database
         const dbPanel = await prisma.panel.findFirst({
           where: { blockchainPanelId: panelId.toString() },
